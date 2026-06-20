@@ -1,3 +1,2 @@
 [build]
-  base    = "crypto-dashboard"
   publish = "crypto-dashboard"
