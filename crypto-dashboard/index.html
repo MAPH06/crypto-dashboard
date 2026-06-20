@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0d1117">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Crypto Dashboard</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Header ────────────────────────────────────────────── -->
+  <header id="header">
+    <div class="hd-left">
+      <span id="hd-pair">BTC/USDT</span>
+      <span id="current-price">—</span>
+      <span id="price-change" class="price-change">—</span>
+    </div>
+    <div class="hd-right">
+      <span class="stat-block"><span class="stat-lbl">24u H</span><span id="price-high">—</span></span>
+      <span class="stat-block"><span class="stat-lbl">24u L</span><span id="price-low">—</span></span>
+      <span class="stat-block hd-fg"><span class="stat-lbl">Fear&amp;Greed</span><span id="fg-value">—</span></span>
+      <span class="stat-block hd-upd"><span class="stat-lbl">Update</span><span id="last-update">—</span></span>
+    </div>
+  </header>
+
+  <!-- ── Controls ───────────────────────────────────────────── -->
+  <div id="controls">
+    <div class="ctrl-group" id="base-selector"></div>
+    <div class="ctrl-sep" style="margin:0 3px"></div>
+    <div class="ctrl-group" id="quote-buttons"></div>
+    <div class="ctrl-sep"></div>
+    <div class="ctrl-group" id="timeframe-buttons"></div>
+    <div class="ctrl-sep"></div>
+    <div class="ctrl-group" id="chart-type-buttons">
+      <button class="ct-btn active" data-type="candles">Candles</button>
+      <button class="ct-btn"        data-type="line">Lijn</button>
+    </div>
+    <div class="ctrl-sep"></div>
+    <div class="ctrl-group" id="indicator-buttons"></div>
+  </div>
+
+  <!-- ── Chart wrapper (main + oscillator) ─────────────────── -->
+  <div id="chart-wrapper">
+
+    <!-- Main price chart -->
+    <div id="main-chart-area">
+      <div id="chart-container"></div>
+
+      <div id="ohlc-tooltip" class="hidden">
+        <span id="tt-time" class="tt-time"></span>
+        <span class="tt-item"><span class="tt-lbl">O</span><span id="tt-open"></span></span>
+        <span class="tt-item"><span class="tt-lbl">H</span><span id="tt-high"></span></span>
+        <span class="tt-item"><span class="tt-lbl">L</span><span id="tt-low"></span></span>
+        <span class="tt-item"><span class="tt-lbl">C</span><span id="tt-close"></span></span>
+      </div>
+
+      <div id="loading">
+        <div class="spinner"></div>
+        <span>Laden…</span>
+      </div>
+
+      <div id="error-banner" class="hidden">
+        <span id="error-msg"></span>
+        <button id="retry-btn">Opnieuw</button>
+      </div>
+    </div>
+
+    <!-- RSI / Stochastic oscillator pane -->
+    <div id="osc-wrapper">
+      <div id="osc-legend">
+        <span class="osc-li rsi">RSI(14)</span>
+        <span class="osc-li stk">Stoch %K(14,3)</span>
+        <span class="osc-li std">Stoch %D(3)</span>
+        <span class="osc-ref">OB&nbsp;80 / OS&nbsp;20</span>
+      </div>
+      <div id="osc-container"></div>
+    </div>
+
+    <!-- MACD pane -->
+    <div id="macd-wrapper" class="hidden">
+      <div id="macd-legend">
+        <span class="macd-li macd-line">MACD(12,26)</span>
+        <span class="macd-li macd-sig">Signal(9)</span>
+        <span class="macd-li macd-hist">Histogram</span>
+      </div>
+      <div id="macd-container"></div>
+    </div>
+
+  </div><!-- end chart-wrapper -->
+
+  <!-- ── Trend Panel ────────────────────────────────────────── -->
+  <div id="trend-panel">
+    <div id="trend-scroll">
+      <table id="trend-table">
+        <thead>
+          <tr>
+            <th>TF</th>
+            <th>Volume</th>
+            <th>Trend (Ichimoku)</th>
+            <th>Trend</th>
+            <th>Trend (MA's)</th>
+            <th>Momentum (RSI)</th>
+            <th>Entry (Stoch)</th>
+            <th>Exit</th>
+            <th>Signalen (SMA50×SMA200)</th>
+            <th>Setup</th>
+            <th>Entry</th>
+            <th>SL</th>
+            <th>TP</th>
+          </tr>
+        </thead>
+        <tbody id="trend-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
