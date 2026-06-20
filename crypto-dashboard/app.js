@@ -382,14 +382,14 @@ function initOscChart() {
     syncing = true;
     oscChart.timeScale().setVisibleRange(r);
     macdChart?.timeScale().setVisibleRange(r);
-    syncing = false;
+    setTimeout(() => { syncing = false; }, 0);
   });
   oscChart.timeScale().subscribeVisibleTimeRangeChange(r => {
     if (syncing || !r) return;
     syncing = true;
     chart.timeScale().setVisibleRange(r);
     macdChart?.timeScale().setVisibleRange(r);
-    syncing = false;
+    setTimeout(() => { syncing = false; }, 0);
   });
 }
 
@@ -431,7 +431,7 @@ function initMacdChart() {
     syncing = true;
     chart.timeScale().setVisibleRange(r);
     oscChart.timeScale().setVisibleRange(r);
-    syncing = false;
+    setTimeout(() => { syncing = false; }, 0);
   });
 }
 
