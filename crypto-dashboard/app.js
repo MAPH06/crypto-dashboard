@@ -1484,11 +1484,13 @@ const LOW_ICHI_TFS = new Set(['1H', '5m', '1m']);
 function maTrendOrderHtml(candles) {
   const closes = candles.map(c => c.close);
   const price  = closes.at(-1);
+  const m9     = calcEMA(candles, 9).at(-1)?.value ?? null;
   const m20    = smaLastExp(closes, 20);
   const m50    = smaLastExp(closes, 50);
   const m200   = smaLastExp(closes, 200);
 
-  const items = [{ val: price, tag: 'PRIJS', color: '#e6edf3' }];
+  const items = [{ val: price, tag: 'PRIJS', color: '#79c0ff' }];
+  if (m9   != null) items.push({ val: m9,   tag: 'MA9',   color: '#d0d7de' });
   if (m20  != null) items.push({ val: m20,  tag: 'MA20',  color: '#f5e642' });
   if (m50  != null) items.push({ val: m50,  tag: 'MA50',  color: '#fd7e14' });
   if (m200 != null) items.push({ val: m200, tag: 'MA200', color: '#f85149' });
