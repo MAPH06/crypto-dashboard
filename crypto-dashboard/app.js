@@ -750,9 +750,11 @@ function calcTradeSetup(candles) {
       ? (strong ? '↑↑ LONG' : '↑ LONG')
       : (strong ? '↓↓ SHORT' : '↓ SHORT'),
     direction,
-    entry: fmtP(price),
-    sl:    fmtP(sl),
-    tp:    fmtP(tp),
+    entry:    fmtP(price),
+    sl:       fmtP(sl),
+    tp:       fmtP(tp),
+    entryRaw: price,
+    tpRaw:    tp,
   };
 }
 
@@ -1570,12 +1572,18 @@ async function updateTrendPanel(symbol) {
     const setPx = (cls, val) => { const el = row.querySelector(`.${cls}`); if (el) el.textContent = val; };
     if (!setup) {
       setCell('td-setup', '—', 'neutral');
-      ['td-ep','td-sl','td-tp'].forEach(c => setPx(c, '—'));
+      ['td-ep','td-sl','td-tp','td-pct'].forEach(c => setPx(c, '—'));
     } else {
       setCell('td-setup', setup.label, setup.direction);
       setPx('td-ep', setup.entry);
       setPx('td-sl', setup.sl);
       setPx('td-tp', setup.tp);
+      const pct = ((setup.tpRaw - setup.entryRaw) / setup.entryRaw) * 100;
+      const pctEl = row.querySelector('.td-pct');
+      if (pctEl) {
+        pctEl.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
+        pctEl.className = 'td-pct ' + (pct >= 0 ? 'positive' : 'negative');
+      }
     }
   });
 }
@@ -1716,7 +1724,8 @@ function buildTrendRows() {
       <td class="td-setup neutral">—</td>
       <td class="td-ep">—</td>
       <td class="td-sl">—</td>
-      <td class="td-tp">—</td>`;
+      <td class="td-tp">—</td>
+      <td class="td-pct">—</td>`;
     tbody.appendChild(tr);
   });
 }

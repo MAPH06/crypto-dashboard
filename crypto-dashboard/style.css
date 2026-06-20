@@ -276,7 +276,7 @@ html, body {
 }
 #trend-table {
   width: 100%;
-  min-width: 1700px;
+  min-width: 1780px;
   border-collapse: collapse;
   font-size: 11px;
 }
@@ -355,6 +355,9 @@ html, body {
 .td-ep             { color: var(--text);              font-size: 10.5px; }
 .td-sl             { color: rgba(218,54,51,0.90);     font-size: 10.5px; font-weight: 600; }
 .td-tp             { color: rgba(38,166,65,0.90);     font-size: 10.5px; font-weight: 600; }
+.td-pct            { font-size: 10.5px; font-weight: 700; }
+.td-pct.positive   { color: #26a641; }
+.td-pct.negative   { color: #da3633; }
 
 /* ── MACD Pane ───────────────────────────────────────────── */
 #macd-wrapper {
