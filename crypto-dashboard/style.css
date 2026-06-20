@@ -276,7 +276,7 @@ html, body {
 }
 #trend-table {
   width: 100%;
-  min-width: 1620px;
+  min-width: 1700px;
   border-collapse: collapse;
   font-size: 11px;
 }
@@ -328,6 +328,10 @@ html, body {
 .td-ma.strong-bear { color: #da3633; font-weight: 700; }
 .td-ma.weak-bull   { color: #57ab5a; font-weight: 600; }
 .td-ma.weak-bear   { color: #e5534b; font-weight: 600; }
+
+.td-bb              { color: var(--muted); font-size: 10.5px; }
+.td-bb.bb-squeeze   { color: #bc8cff; font-weight: 700; }
+.td-bb.bb-wide      { color: #fd7e14; font-weight: 700; }
 
 .td-mom.rsi-ext-bull { color: #26a641; font-weight: 700; }
 .td-mom.rsi-bull     { color: #57ab5a; font-weight: 600; }

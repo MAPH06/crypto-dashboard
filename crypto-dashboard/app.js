@@ -496,6 +496,15 @@ function calcBB(candles, period = 20, mult = 2) {
   return { upper, mid, lower };
 }
 
+function calcBBWidth(candles) {
+  const bb = calcBB(candles);
+  if (!bb.upper.length) return null;
+  const upper = bb.upper.at(-1).value;
+  const mid   = bb.mid.at(-1).value;
+  const lower = bb.lower.at(-1).value;
+  return ((upper - lower) / mid) * 100;
+}
+
 function calcRSI(candles, period = 14) {
   if (candles.length <= period) return [];
   const closes = candles.map(c => c.close);
@@ -1505,7 +1514,7 @@ async function updateTrendPanel(symbol) {
     };
 
     if (!candles.length) {
-      ['td-vol','td-ichi','td-trend-sig','td-ma','td-mom','td-entry','td-exit','td-signals','td-setup']
+      ['td-vol','td-ichi','td-trend-sig','td-ma','td-bb','td-mom','td-entry','td-exit','td-signals','td-setup']
         .forEach(c => setCell(c, '—', 'neutral'));
       ['td-ep','td-sl','td-tp'].forEach(c => {
         const el = row.querySelector(`.${c}`); if (el) el.textContent = '—';
@@ -1527,6 +1536,14 @@ async function updateTrendPanel(symbol) {
     if (maEl) {
       maEl.className = 'td-ma neutral';
       maEl.innerHTML = maTrendOrderHtml(candles);
+    }
+
+    const bbw = calcBBWidth(candles);
+    if (bbw == null) {
+      setCell('td-bb', '—', 'neutral');
+    } else {
+      const cls = bbw < 2 ? 'bb-squeeze' : bbw > 8 ? 'bb-wide' : 'neutral';
+      setCell('td-bb', bbw.toFixed(1) + '%', cls);
     }
 
     const mom = rsiMomentumAnalysis(candles);
@@ -1691,6 +1708,7 @@ function buildTrendRows() {
       <td class="td-ichi neutral">—</td>
       <td class="td-trend-sig neutral">—</td>
       <td class="td-ma neutral">—</td>
+      <td class="td-bb neutral">—</td>
       <td class="td-mom neutral">—</td>
       <td class="td-entry neutral">—</td>
       <td class="td-exit neutral">—</td>
