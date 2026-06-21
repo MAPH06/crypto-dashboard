@@ -178,6 +178,48 @@ html, body {
 .tt-lbl  { color: var(--muted); }
 #tt-open, #tt-high, #tt-low, #tt-close { color: var(--text); font-weight: 600; }
 
+/* ── Measure tool ────────────────────────────────────────── */
+#measure-overlay {
+  position: absolute;
+  top: 50px;
+  right: 60px;
+  background: rgba(13,17,23,0.95);
+  border: 1px solid rgba(255,193,7,0.50);
+  border-radius: var(--r);
+  padding: 8px 12px 8px 12px;
+  font-size: 11px;
+  z-index: 15;
+  min-width: 160px;
+  pointer-events: auto;
+}
+#measure-overlay.hidden { display: none; }
+.meas-row  { display: flex; justify-content: space-between; gap: 12px; padding: 1px 0; }
+.meas-lbl  { color: var(--muted); }
+.meas-pct  { font-size: 13px; font-weight: 700; padding-top: 4px; border-top: 1px solid var(--border); margin-top: 2px; }
+.meas-close {
+  position: absolute; top: 4px; right: 6px;
+  background: none; border: none; color: var(--muted);
+  font-size: 14px; cursor: pointer; line-height: 1; padding: 0;
+}
+.meas-close:hover { color: var(--text); }
+
+#measure-hint {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255,193,7,0.15);
+  border: 1px solid rgba(255,193,7,0.40);
+  border-radius: var(--r);
+  padding: 4px 12px;
+  font-size: 11px;
+  color: #ffc107;
+  pointer-events: none;
+  z-index: 15;
+  white-space: nowrap;
+}
+#measure-hint.hidden { display: none; }
+
 /* ── Loading ─────────────────────────────────────────────── */
 #loading {
   position: absolute;

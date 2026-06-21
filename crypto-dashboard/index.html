@@ -42,6 +42,10 @@
     </div>
     <div class="ctrl-sep"></div>
     <div class="ctrl-group" id="indicator-buttons"></div>
+    <div class="ctrl-sep"></div>
+    <div class="ctrl-group">
+      <button class="tf-btn" id="measure-btn" onclick="toggleMeasure()" title="Meet prijsverschil tussen twee punten">📐 Meten</button>
+    </div>
   </div>
 
   <!-- ── Chart wrapper (main + oscillator) ─────────────────── -->
@@ -58,6 +62,9 @@
         <span class="tt-item"><span class="tt-lbl">L</span><span id="tt-low"></span></span>
         <span class="tt-item"><span class="tt-lbl">C</span><span id="tt-close"></span></span>
       </div>
+
+      <div id="measure-overlay" class="hidden"></div>
+      <div id="measure-hint" class="hidden">📐 Selecteer tweede punt…</div>
 
       <div id="loading">
         <div class="spinner"></div>

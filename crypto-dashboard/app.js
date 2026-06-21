@@ -182,6 +182,11 @@ let chartTimer    = null;
 let trendTimer    = null;
 let syncing       = false;
 
+// Measure tool state
+let measureMode   = false;
+let measureP1     = null;
+let measureLine   = null;
+
 // Chart series
 let chart        = null;
 let oscChart     = null;
@@ -390,6 +395,31 @@ function initOscChart() {
     chart.timeScale().setVisibleRange(r);
     macdChart?.timeScale().setVisibleRange(r);
     setTimeout(() => { syncing = false; }, 0);
+  });
+
+  // Measure tool — click handler
+  chart.subscribeClick(param => {
+    if (!measureMode || !param.point || !param.time) return;
+    const price = candleSeries.coordinateToPrice(param.point.y);
+    if (price == null) return;
+    if (!measureP1) {
+      measureP1 = { time: param.time, price };
+      if (measureLine) { try { candleSeries.removePriceLine(measureLine); } catch (_) {} }
+      measureLine = candleSeries.createPriceLine({
+        price, color: 'rgba(255,193,7,0.80)', lineWidth: 1,
+        lineStyle: LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: false, title: '📐 P1',
+      });
+      const hint = document.getElementById('measure-hint');
+      if (hint) hint.classList.remove('hidden');
+    } else {
+      const p2 = { time: param.time, price };
+      if (measureLine) { try { candleSeries.removePriceLine(measureLine); } catch (_) {} measureLine = null; }
+      showMeasureResult(measureP1, p2);
+      measureP1 = null;
+      const hint = document.getElementById('measure-hint');
+      if (hint) hint.classList.add('hidden');
+    }
   });
 }
 
@@ -1172,9 +1202,11 @@ async function loadChart(tf, sym, resetView = true) {
     // `vr.to >= lastCandleTime` is true when the user is at the live edge.
     // If they've scrolled back into history, vr.to < lastCandleTime.
     let atLiveEnd = resetView;
+    let savedRange = null;
     if (!resetView && currentCandles.length > 0) {
       const vr = chart.timeScale().getVisibleRange();
       atLiveEnd = vr != null && vr.to >= currentCandles.at(-1).time;
+      if (!atLiveEnd) savedRange = vr;
     }
 
     const [raw, ticker] = await Promise.all([
@@ -1260,7 +1292,14 @@ async function loadChart(tf, sym, resetView = true) {
         oscChart.timeScale().setVisibleRange({ from: fromTime, to: toTime });
         macdChart?.timeScale().setVisibleRange({ from: fromTime, to: toTime });
       }
-      syncing = false;
+      setTimeout(() => { syncing = false; }, 0);
+    } else if (savedRange) {
+      // User was scrolled back in history — restore their exact view position
+      syncing = true;
+      chart.timeScale().setVisibleRange(savedRange);
+      oscChart.timeScale().setVisibleRange(savedRange);
+      macdChart?.timeScale().setVisibleRange(savedRange);
+      setTimeout(() => { syncing = false; }, 0);
     }
 
     if (ticker) updateHeader(ticker, sym);
@@ -1271,6 +1310,44 @@ async function loadChart(tf, sym, resetView = true) {
   } finally {
     showLoading(false);
   }
+}
+
+function toggleMeasure() {
+  measureMode = !measureMode;
+  measureP1   = null;
+  if (measureLine) { try { candleSeries.removePriceLine(measureLine); } catch (_) {} measureLine = null; }
+  document.getElementById('measure-overlay').classList.add('hidden');
+  document.getElementById('measure-hint')?.classList.add('hidden');
+  document.getElementById('chart-container').style.cursor = measureMode ? 'crosshair' : '';
+  const btn = document.getElementById('measure-btn');
+  if (btn) {
+    if (measureMode) {
+      btn.style.color = '#ffc107'; btn.style.borderColor = 'rgba(255,193,7,0.5)';
+      btn.style.background = 'rgba(255,193,7,0.10)';
+    } else {
+      btn.style.color = ''; btn.style.borderColor = ''; btn.style.background = '';
+    }
+  }
+}
+
+function showMeasureResult(p1, p2) {
+  const diff    = p2.price - p1.price;
+  const pct     = (diff / p1.price) * 100;
+  const sign    = pct >= 0 ? '+' : '';
+  const color   = pct >= 0 ? '#26a641' : '#da3633';
+  const i1 = currentCandles.findIndex(c => c.time >= p1.time);
+  const i2 = currentCandles.findIndex(c => c.time >= p2.time);
+  const bars = (i1 >= 0 && i2 >= 0) ? Math.abs(i2 - i1) : '—';
+
+  const ov = document.getElementById('measure-overlay');
+  ov.innerHTML = `
+    <div class="meas-row"><span class="meas-lbl">Van</span><span>${fmtP(p1.price)}</span></div>
+    <div class="meas-row"><span class="meas-lbl">Naar</span><span>${fmtP(p2.price)}</span></div>
+    <div class="meas-row"><span class="meas-lbl">Verschil</span><span style="color:${color}">${sign}${fmtP(Math.abs(diff))}</span></div>
+    <div class="meas-row meas-pct"><span class="meas-lbl">%</span><span style="color:${color}">${sign}${pct.toFixed(2)}%</span></div>
+    <div class="meas-row"><span class="meas-lbl">Candles</span><span>${bars}</span></div>
+    <button class="meas-close" onclick="document.getElementById('measure-overlay').classList.add('hidden')">×</button>`;
+  ov.classList.remove('hidden');
 }
 
 function applyChartType() {
