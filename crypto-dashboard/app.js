@@ -125,23 +125,27 @@ function buildSym(base, quote) {
 }
 
 const TIMEFRAMES = [
-  { label: '1M', interval: '1M', limit: 1000, view: 36  },
-  { label: '1W', interval: '1w', limit:  600, view: 52  },
-  { label: '1D', interval: '1d', limit:  600, view: 90  },
-  { label: '4H', interval: '4h', limit:  600, view: 120 },
-  { label: '1H', interval: '1h', limit:  600, view: 120 },
-  { label: '5m', interval: '5m', limit:  600, view: 120 },
-  { label: '1m', interval: '1m', limit:  600, view: 120 },
+  { label: '1M',  interval: '1M',  limit: 1000, view: 36  },
+  { label: '1W',  interval: '1w',  limit:  600, view: 52  },
+  { label: '1D',  interval: '1d',  limit:  600, view: 90  },
+  { label: '4H',  interval: '4h',  limit:  600, view: 120 },
+  { label: '1H',  interval: '1h',  limit:  600, view: 120 },
+  { label: '15m', interval: '15m', limit:  600, view: 120 },
+  { label: '5m',  interval: '5m',  limit:  600, view: 120 },
+  { label: '3m',  interval: '3m',  limit:  600, view: 120 },
+  { label: '1m',  interval: '1m',  limit:  600, view: 120 },
 ];
 
 const TREND_TFS = [
-  { label: '1M', interval: '1M' },
-  { label: '1W', interval: '1w' },
-  { label: '1D', interval: '1d' },
-  { label: '4H', interval: '4h' },
-  { label: '1H', interval: '1h' },
-  { label: '5m', interval: '5m' },
-  { label: '1m', interval: '1m' },
+  { label: '1M',  interval: '1M'  },
+  { label: '1W',  interval: '1w'  },
+  { label: '1D',  interval: '1d'  },
+  { label: '4H',  interval: '4h'  },
+  { label: '1H',  interval: '1h'  },
+  { label: '15m', interval: '15m' },
+  { label: '5m',  interval: '5m'  },
+  { label: '3m',  interval: '3m'  },
+  { label: '1m',  interval: '1m'  },
 ];
 
 // Overlay indicators on the main chart
@@ -1607,7 +1611,7 @@ function detectCross(candles) {
   return null;
 }
 
-const LOW_ICHI_TFS = new Set(['1H', '5m', '1m']);
+const LOW_ICHI_TFS = new Set(['1H', '15m', '5m', '3m', '1m']);
 
 function maTrendOrderHtml(candles) {
   const closes = candles.map(c => c.close);
