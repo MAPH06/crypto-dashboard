@@ -152,11 +152,8 @@ const TREND_TFS = [
 const OVERLAY_INDS = [
   { id: 'ema9',     label: 'EMA9',      color: '#d0d7de',              defaultOn: false },
   { id: 'sma20',    label: 'SMA20',     color: '#f5e642',              defaultOn: true  },
-  { id: 'dma20',    label: 'DMA20',     color: '#f5e642',              defaultOn: false },
   { id: 'sma50',    label: 'SMA50',     color: '#fd7e14',              defaultOn: true  },
-  { id: 'dma50',    label: 'DMA50',     color: '#fd7e14',              defaultOn: false },
   { id: 'sma200',   label: 'SMA200',    color: '#f85149',              defaultOn: true  },
-  { id: 'dma200',   label: 'DMA200',    color: '#f85149',              defaultOn: false },
   { id: 'bb',       label: 'Bollinger', color: '#79c0ff',              defaultOn: false },
   { id: 'psar',     label: 'PSAR',      color: '#f0b429',              defaultOn: false },
   { id: 'ichimoku', label: 'Ichimoku',  color: '#bc8cff',              defaultOn: false },
@@ -373,17 +370,6 @@ function initChart() {
   ser.sma50  = mkLine(chart, '#fd7e14', 2, false);
   ser.sma20  = mkLine(chart, '#f5e642', 2, false);
   ser.ema9   = mkLine(chart, '#d0d7de', 2, false);
-
-  // Displaced MAs — same colors as their SMA counterparts, dashed to distinguish
-  const DL = LightweightCharts.LineStyle.Dashed;
-  const mkDMA = (color) => chart.addLineSeries({
-    color, lineWidth: 1.5, lineStyle: DL,
-    lastValueVisible: false, priceLineVisible: false,
-    crosshairMarkerVisible: false, visible: false,
-  });
-  ser.dma20  = mkDMA('#f5e642');
-  ser.dma50  = mkDMA('#fd7e14');
-  ser.dma200 = mkDMA('#f85149');
 
   // BamBam stepping line — EMA(21) as dynamic support/resistance guide
   ser.bbStep = chart.addLineSeries({
@@ -677,17 +663,6 @@ function calcSMAExp(candles, period) {
     sum += closes[i];
     if (i >= period) sum -= closes[i - period];
     result.push({ time: candles[i].time, value: sum / Math.min(i + 1, period) });
-  }
-  return result;
-}
-
-// Displaced MA: SMA shifted `offset` bars forward in time
-// Each SMA value calculated at bar i is plotted at bar i+offset, acting as a leading guide
-function calcDMA(candles, period, offset) {
-  const sma = calcSMAExp(candles, period);
-  const result = [];
-  for (let i = 0; i < sma.length - offset; i++) {
-    result.push({ time: candles[i + offset].time, value: sma[i].value });
   }
   return result;
 }
@@ -1491,11 +1466,6 @@ async function loadChart(tf, sym, resetView = true) {
     ser.sma20.setData( calcSMAExp(candles, 20));
     ser.ema9.setData(  calcEMA(candles, 9));
 
-    // Displaced MAs — offsets: DMA20→3, DMA50→5, DMA200→20 bars forward
-    ser.dma20.setData(  calcDMA(candles, 20,  3));
-    ser.dma50.setData(  calcDMA(candles, 50,  5));
-    ser.dma200.setData( calcDMA(candles, 200, 20));
-
     // Bollinger Bands
     const bb = calcBB(candles);
     ser.bb_upper.setData(bb.upper);
@@ -1639,9 +1609,7 @@ function applyAllVisibility() {
   ser.sma50.applyOptions(  { visible: indVisible.sma50  });
   ser.sma20.applyOptions(  { visible: indVisible.sma20  });
   ser.ema9.applyOptions(   { visible: indVisible.ema9   });
-  ser.dma20.applyOptions(  { visible: indVisible.dma20  });
-  ser.dma50.applyOptions(  { visible: indVisible.dma50  });
-  ser.dma200.applyOptions( { visible: indVisible.dma200 });
+
 
   const bb = indVisible.bb;
   ser.bb_upper.applyOptions({ visible: bb });
