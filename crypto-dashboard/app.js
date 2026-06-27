@@ -162,6 +162,7 @@ const OVERLAY_INDS = [
   { id: 'sr',       label: 'S/R',       color: '#58a6ff',              defaultOn: false },
   { id: 'liq',      label: 'LIQ',       color: '#ffc107',              defaultOn: false },
   { id: 'phases',   label: 'Fases',     color: '#bc8cff',              defaultOn: false },
+  { id: 'bambam',   label: 'BamBam',    color: '#f0b429',              defaultOn: false },
 ];
 
 // Oscillator indicators (independent toggles)
@@ -192,6 +193,7 @@ let measureMode   = false;
 let measureP1     = null;
 let measureLine   = null;
 let phasesCanvas  = null;
+let bambamSignals = [];
 
 // ── Bitcoin halving dates ────────────────────────────────────
 const HALVINGS = [
@@ -369,6 +371,14 @@ function initChart() {
   ser.sma20  = mkLine(chart, '#f5e642', 2, false);
   ser.ema9   = mkLine(chart, '#d0d7de', 2, false);
 
+  // BamBam stepping line — EMA(21) as dynamic support/resistance guide
+  ser.bbStep = chart.addLineSeries({
+    color: '#f0b429', lineWidth: 1.5,
+    lineStyle: LightweightCharts.LineStyle.Dashed,
+    lastValueVisible: false, priceLineVisible: false,
+    crosshairMarkerVisible: false, visible: false,
+  });
+
   // Bollinger Bands (3 lines, default hidden)
   ser.bb_upper  = mkLine(chart, 'rgba(121,192,255,0.8)', 1, false, true);
   ser.bb_mid    = mkLine(chart, 'rgba(121,192,255,0.4)', 1, false, true);
@@ -485,6 +495,25 @@ function initOscChart() {
   ser.stochD = mkLine(oscChart, '#f85149', 1,   false);
 
   const LS = LightweightCharts.LineStyle;
+
+  // BamBam oscillator components
+  ser.bbRsiEma = oscChart.addLineSeries({
+    color: '#f5e642', lineWidth: 2,
+    lastValueVisible: false, priceLineVisible: false,
+    crosshairMarkerVisible: false, visible: false,
+  });
+  ser.bbUpper = oscChart.addLineSeries({
+    color: 'rgba(218,54,51,0.80)', lineWidth: 1,
+    lineStyle: LS.Dashed,
+    lastValueVisible: false, priceLineVisible: false,
+    crosshairMarkerVisible: false, visible: false,
+  });
+  ser.bbLower = oscChart.addLineSeries({
+    color: 'rgba(38,166,65,0.80)', lineWidth: 1,
+    lineStyle: LS.Dashed,
+    lastValueVisible: false, priceLineVisible: false,
+    crosshairMarkerVisible: false, visible: false,
+  });
 
   // RSI reference lines
   [{ p: 70, c: 'rgba(218,54,51,0.45)', s: LS.Dashed },
@@ -707,6 +736,92 @@ function calcBBWidth(candles) {
   const mid   = bb.mid.at(-1).value;
   const lower = bb.lower.at(-1).value;
   return ((upper - lower) / mid) * 100;
+}
+
+// ── Didi BAM BAM indicator ───────────────────────────────────────────────
+// Stepping line  : EMA(21) on close → main chart overlay
+// Oscillator     : EMA(14) of RSI(14) with normalised ATR bands
+// Signals        : fast RSI(7) crosses RSI-EMA, filtered by RSI>50 and close vs step
+function calcBamBam(candles) {
+  const empty = { step: [], rsiEma: [], upper: [], lower: [], signals: [] };
+  if (candles.length < 28) return empty;
+
+  const mult = 4.0;
+
+  // Stepping line on main chart
+  const step = calcEMA(candles, 21);
+
+  // RSI(14) and fast RSI(7)
+  const rsiData  = calcRSI(candles, 14);
+  const fastRsi  = calcRSI(candles, 7);
+
+  // EMA(14) of RSI
+  const rsiEma = [];
+  if (rsiData.length >= 14) {
+    const k = 2 / 15;
+    let ema = rsiData.slice(0, 14).reduce((s, d) => s + d.value, 0) / 14;
+    rsiEma.push({ time: rsiData[13].time, value: ema });
+    for (let i = 14; i < rsiData.length; i++) {
+      ema = rsiData[i].value * k + ema * (1 - k);
+      rsiEma.push({ time: rsiData[i].time, value: ema });
+    }
+  }
+
+  // Wilder ATR(10) indexed by candle time
+  const atrByTime = new Map();
+  if (candles.length > 10) {
+    const trs = candles.slice(1).map((c, i) =>
+      Math.max(c.high - c.low, Math.abs(c.high - candles[i].close), Math.abs(c.low - candles[i].close))
+    );
+    let atr = trs.slice(0, 10).reduce((a, b) => a + b) / 10;
+    atrByTime.set(candles[10].time, atr);
+    for (let i = 10; i < trs.length; i++) {
+      atr = (atr * 9 + trs[i]) / 10;
+      atrByTime.set(candles[i + 1].time, atr);
+    }
+  }
+
+  // Upper/lower bands: rsiEma ± normalised ATR * mult
+  // Normalising by (atr/close)*100 keeps the band in RSI 0-100 space regardless of coin price
+  const candleIdx = new Map(candles.map((c, i) => [c.time, i]));
+  const upper = [], lower = [];
+  rsiEma.forEach(re => {
+    const ci  = candleIdx.get(re.time);
+    const atr = atrByTime.get(re.time);
+    if (ci == null || !atr) return;
+    const normAtr = (atr / candles[ci].close) * 100;
+    upper.push({ time: re.time, value: Math.min(100, re.value + normAtr * mult) });
+    lower.push({ time: re.time, value: Math.max(0,   re.value - normAtr * mult) });
+  });
+
+  // Signal generation
+  const signals = [];
+  const rsiEmaMap  = new Map(rsiEma.map(d   => [d.time, d.value]));
+  const stepMap    = new Map(step.map(d     => [d.time, d.value]));
+  const rsiDataMap = new Map(rsiData.map(d  => [d.time, d.value]));
+
+  for (let i = 1; i < fastRsi.length; i++) {
+    const t   = fastRsi[i].time;
+    const tp  = fastRsi[i - 1].time;
+    const fk  = fastRsi[i].value;
+    const fkp = fastRsi[i - 1].value;
+    const ek  = rsiEmaMap.get(t);
+    const ekp = rsiEmaMap.get(tp);
+    if (ek == null || ekp == null) continue;
+    const ci     = candleIdx.get(t);
+    if (ci == null) continue;
+    const close  = candles[ci].close;
+    const sLine  = stepMap.get(t) ?? 0;
+    const rsiNow = rsiDataMap.get(t) ?? 50;
+
+    if (fkp <= ekp && fk > ek && rsiNow > 50 && close > sLine) {
+      signals.push({ time: t, position: 'belowBar', color: '#26a641', shape: 'arrowUp',   size: 1, text: '↑' });
+    } else if (fkp >= ekp && fk < ek && rsiNow < 50 && close < sLine) {
+      signals.push({ time: t, position: 'aboveBar', color: '#e5534b', shape: 'arrowDown', size: 1, text: '↓' });
+    }
+  }
+
+  return { step, rsiEma, upper, lower, signals };
 }
 
 function calcRSI(candles, period = 14) {
@@ -1169,8 +1284,11 @@ function applySwingAndSR() {
       time: l.time, position: 'belowBar',
       color: '#26a641', shape: 'arrowUp', text: 'L', size: 1,
     }));
-    markers.sort((a, b) => a.time - b.time);
   }
+  if (indVisible.bambam) {
+    bambamSignals.forEach(s => markers.push(s));
+  }
+  markers.sort((a, b) => a.time - b.time);
   candleSeries.setMarkers(markers);
 
   // ── S/R price lines ──────────────────────────────────
@@ -1389,6 +1507,14 @@ async function loadChart(tf, sym, resetView = true) {
     ser.macdSignal.setData(macdData.signal);
     ser.macdHist.setData(  macdData.hist);
 
+    // BamBam
+    const bbData = calcBamBam(candles);
+    bambamSignals = bbData.signals;
+    ser.bbStep.setData(   bbData.step);
+    ser.bbRsiEma.setData( bbData.rsiEma);
+    ser.bbUpper.setData(  bbData.upper);
+    ser.bbLower.setData(  bbData.lower);
+
     // Store for swing/SR so toggle callbacks can re-apply without re-fetching
     currentCandles  = candles;
     currentSwingPts = calcSwingPoints(candles);
@@ -1507,7 +1633,13 @@ function applyAllVisibility() {
   ser.stochK.applyOptions(   { visible: indVisible.stoch });
   ser.stochD.applyOptions(   { visible: indVisible.stoch });
   ser.stochBand.applyOptions({ visible: indVisible.stoch });
-  toggleOscPane(indVisible.rsi || indVisible.stoch);
+
+  const bb2 = indVisible.bambam;
+  ser.bbStep.applyOptions(   { visible: bb2 });
+  ser.bbRsiEma.applyOptions( { visible: bb2 });
+  ser.bbUpper.applyOptions(  { visible: bb2 });
+  ser.bbLower.applyOptions(  { visible: bb2 });
+  toggleOscPane(indVisible.rsi || indVisible.stoch || bb2);
   updateOscLegend();
 
   [ser.macdLine, ser.macdSignal, ser.macdHist].forEach(s => s.applyOptions({ visible: indVisible.macd }));
@@ -1531,6 +1663,15 @@ function toggleIndicator(id, visible) {
   }
   if (id === 'phases') {
     drawPhases();
+    return;
+  }
+  if (id === 'bambam') {
+    ser.bbStep.applyOptions(   { visible });
+    ser.bbRsiEma.applyOptions( { visible });
+    ser.bbUpper.applyOptions(  { visible });
+    ser.bbLower.applyOptions(  { visible });
+    toggleOscPane(indVisible.rsi || indVisible.stoch || visible);
+    applySwingAndSR();
     return;
   }
   if (id === 'rsi' || id === 'stoch') {
@@ -2057,7 +2198,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   buildIndicatorButtons();
   buildTrendRows();
 
-  if (!indVisible.rsi && !indVisible.stoch) toggleOscPane(false);
+  if (!indVisible.rsi && !indVisible.stoch && !indVisible.bambam) toggleOscPane(false);
   if (!indVisible.macd) toggleMacdPane(false);
 
   document.getElementById('retry-btn').addEventListener('click', async () => {
