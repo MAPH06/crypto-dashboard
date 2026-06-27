@@ -161,6 +161,7 @@ const OVERLAY_INDS = [
   { id: 'swing',    label: 'Swing',     color: '#bc8cff',              defaultOn: false },
   { id: 'sr',       label: 'S/R',       color: '#58a6ff',              defaultOn: false },
   { id: 'liq',      label: 'LIQ',       color: '#ffc107',              defaultOn: false },
+  { id: 'phases',   label: 'Fases',     color: '#bc8cff',              defaultOn: false },
 ];
 
 // Oscillator indicators (independent toggles)
@@ -190,6 +191,117 @@ let syncing       = false;
 let measureMode   = false;
 let measureP1     = null;
 let measureLine   = null;
+let phasesCanvas  = null;
+
+// ── Bitcoin halving dates ────────────────────────────────────
+const HALVINGS = [
+  { date: '2012-11-28', label: 'H1' },
+  { date: '2016-07-09', label: 'H2' },
+  { date: '2020-05-11', label: 'H3' },
+  { date: '2024-04-19', label: 'H4' },
+  { date: '2028-04-20', label: 'H5' },  // estimated
+];
+
+// ── Historical Bitcoin market cycle phases ───────────────────
+const CYCLE_PHASES = [
+  // Cycle 1
+  { type: 'accum', from: '2012-01-01', to: '2012-10-01' },
+  { type: 'bull',  from: '2012-10-01', to: '2013-11-30' },
+  { type: 'dist',  from: '2013-11-30', to: '2014-02-28' },
+  { type: 'bear',  from: '2014-02-28', to: '2015-08-01' },
+  // Cycle 2
+  { type: 'accum', from: '2015-08-01', to: '2016-05-01' },
+  { type: 'bull',  from: '2016-05-01', to: '2017-12-17' },
+  { type: 'dist',  from: '2017-12-17', to: '2018-02-06' },
+  { type: 'bear',  from: '2018-02-06', to: '2018-12-15' },
+  // Cycle 3
+  { type: 'accum', from: '2018-12-15', to: '2020-02-01' },
+  { type: 'bull',  from: '2020-02-01', to: '2021-11-10' },
+  { type: 'dist',  from: '2021-11-10', to: '2022-01-22' },
+  { type: 'bear',  from: '2022-01-22', to: '2022-11-21' },
+  // Cycle 4 (deels geschat)
+  { type: 'accum', from: '2022-11-21', to: '2024-02-15' },
+  { type: 'bull',  from: '2024-02-15', to: '2025-10-01' },
+  { type: 'dist',  from: '2025-10-01', to: '2026-02-01' },
+  { type: 'bear',  from: '2026-02-01', to: '2027-06-01' },
+];
+
+const PHASE_COLORS = {
+  accum: 'rgba(255,235,59,0.13)',
+  bull:  'rgba(38,166,65,0.13)',
+  dist:  'rgba(253,126,20,0.13)',
+  bear:  'rgba(218,54,51,0.13)',
+};
+
+function dateToTs(str) {
+  return Math.floor(new Date(str + 'T00:00:00Z').getTime() / 1000) + TZ_OFFSET_SEC;
+}
+
+function drawPhases() {
+  if (!phasesCanvas || !chart) return;
+  const container = document.getElementById('chart-container');
+  const W = container.offsetWidth, H = container.offsetHeight;
+  phasesCanvas.width  = W;
+  phasesCanvas.height = H;
+  const ctx = phasesCanvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+  if (!indVisible.phases) return;
+
+  const vr = chart.timeScale().getVisibleRange();
+  if (!vr) return;
+  const span = vr.to - vr.from;
+  if (span <= 0) return;
+
+  const tsToX = ts => {
+    const x = chart.timeScale().timeToCoordinate(ts);
+    if (x !== null) return x;
+    return (ts - vr.from) / span * W;   // linear extrapolation for off-screen dates
+  };
+
+  // Phase bands
+  CYCLE_PHASES.forEach(p => {
+    const x1 = tsToX(dateToTs(p.from));
+    const x2 = tsToX(dateToTs(p.to));
+    const left  = Math.max(0, Math.min(x1, x2));
+    const right = Math.min(W, Math.max(x1, x2));
+    if (right <= left) return;
+    ctx.fillStyle = PHASE_COLORS[p.type];
+    ctx.fillRect(left, 0, right - left, H);
+  });
+
+  // Halving markers — thin purple line + label
+  HALVINGS.forEach(h => {
+    const x = tsToX(dateToTs(h.date));
+    if (x < 0 || x > W) return;
+    ctx.strokeStyle = 'rgba(188,140,255,0.70)';
+    ctx.lineWidth   = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle  = 'rgba(188,140,255,0.90)';
+    ctx.font       = 'bold 10px ui-monospace,monospace';
+    ctx.textAlign  = 'center';
+    ctx.fillText(h.label, x, 13);
+  });
+
+  // Phase legend (bottom-left)
+  const legend = [
+    { label: 'Accumulatie', color: PHASE_COLORS.accum },
+    { label: 'Bull Run',    color: PHASE_COLORS.bull  },
+    { label: 'Distributie', color: PHASE_COLORS.dist  },
+    { label: 'Bear Market', color: PHASE_COLORS.bear  },
+  ];
+  let lx = 6, ly = H - 6;
+  ctx.font = '9px ui-monospace,monospace';
+  legend.forEach(l => {
+    ctx.fillStyle = l.color.replace(/[\d.]+\)$/, '0.70)');
+    ctx.fillRect(lx, ly - 9, 10, 10);
+    ctx.fillStyle = 'rgba(139,148,158,0.90)';
+    ctx.textAlign = 'left';
+    ctx.fillText(l.label, lx + 13, ly);
+    lx += ctx.measureText(l.label).width + 28;
+  });
+}
 
 // Chart series
 let chart        = null;
@@ -289,7 +401,14 @@ function initChart() {
   // Responsive resize
   new ResizeObserver(() => {
     chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
+    drawPhases();
   }).observe(el);
+
+  // Phases canvas overlay
+  phasesCanvas = document.createElement('canvas');
+  phasesCanvas.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:2;';
+  el.appendChild(phasesCanvas);
+  chart.timeScale().subscribeVisibleTimeRangeChange(() => drawPhases());
 
   // OHLC crosshair tooltip
   chart.subscribeCrosshairMove(param => {
@@ -1396,6 +1515,7 @@ function applyAllVisibility() {
 
   applySwingAndSR();
   applyLiqZones();
+  drawPhases();
 }
 
 function toggleIndicator(id, visible) {
@@ -1407,6 +1527,10 @@ function toggleIndicator(id, visible) {
   }
   if (id === 'liq') {
     applyLiqZones();
+    return;
+  }
+  if (id === 'phases') {
+    drawPhases();
     return;
   }
   if (id === 'rsi' || id === 'stoch') {
