@@ -1622,7 +1622,7 @@ function maTrendOrderHtml(candles) {
   const m200   = smaLastExp(closes, 200);
 
   const items = [{ val: price, tag: 'PRIJS', color: '#79c0ff' }];
-  if (m9   != null) items.push({ val: m9,   tag: 'MA9',   color: '#d0d7de' });
+  if (m9   != null) items.push({ val: m9,   tag: 'EMA9',  color: '#d0d7de' });
   if (m20  != null) items.push({ val: m20,  tag: 'MA20',  color: '#f5e642' });
   if (m50  != null) items.push({ val: m50,  tag: 'MA50',  color: '#fd7e14' });
   if (m200 != null) items.push({ val: m200, tag: 'MA200', color: '#f85149' });
