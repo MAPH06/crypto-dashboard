@@ -5,7 +5,7 @@
 // ═══════════════════════════════════════════════════════════
 
 const BINANCE_BASE  = 'https://api.binance.com/api/v3';
-const CHART_REFRESH = 20_000;
+const CHART_REFRESH = 120_000;
 const TREND_REFRESH = 5 * 60_000;
 
 // Top-100 non-stablecoin cryptos (BTC first, then by approx. market cap)
