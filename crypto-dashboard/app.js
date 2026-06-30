@@ -1444,16 +1444,20 @@ async function loadChart(tf, sym, resetView = true) {
   showLoading(true);
   hideError();
   try {
-    // Before fetching: check if the chart is already showing the live end.
-    // With rightOffset the visible `to` extends beyond the last candle, so
-    // `vr.to >= lastCandleTime` is true when the user is at the live edge.
-    // If they've scrolled back into history, vr.to < lastCandleTime.
+    // Detect whether the user is at the live edge or scrolled back into history.
     let atLiveEnd = resetView;
-    let savedRange = null;
     if (!resetView && currentCandles.length > 0) {
       const vr = chart.timeScale().getVisibleRange();
       atLiveEnd = vr != null && vr.to >= currentCandles.at(-1).time;
-      if (!atLiveEnd) savedRange = vr;
+    }
+
+    // History-analysis mode: leave the chart completely untouched.
+    // Only refresh the live price ticker so the header stays current.
+    if (!resetView && !atLiveEnd) {
+      const ticker = await fetch24h(sym.symbol);
+      if (ticker) updateHeader(ticker, sym);
+      updateTimestamp();
+      return;
     }
 
     const [raw, ticker] = await Promise.all([
@@ -1528,34 +1532,22 @@ async function loadChart(tf, sym, resetView = true) {
     applyChartType();
     applyAllVisibility();
 
-    // Advance the visible range when:
-    //   a) initial/manual load (resetView=true), OR
-    //   b) background refresh and the user was already at the live end.
-    // If the user has scrolled back to look at history, leave the view alone.
-    if (atLiveEnd) {
-      syncing = true;
-      if (resetView) {
-        chart.timeScale().fitContent();
-        oscChart.timeScale().fitContent();
-        macdChart?.timeScale().fitContent();
-      }
-      const total = candles.length;
-      if (total > tf.view) {
-        const fromTime = candles[total - tf.view].time;
-        const toTime   = candles[total - 1].time;
-        chart.timeScale().setVisibleRange({ from: fromTime, to: toTime });
-        oscChart.timeScale().setVisibleRange({ from: fromTime, to: toTime });
-        macdChart?.timeScale().setVisibleRange({ from: fromTime, to: toTime });
-      }
-      setTimeout(() => { syncing = false; }, 0);
-    } else if (savedRange) {
-      // User was scrolled back in history — restore their exact view position
-      syncing = true;
-      chart.timeScale().setVisibleRange(savedRange);
-      oscChart.timeScale().setVisibleRange(savedRange);
-      macdChart?.timeScale().setVisibleRange(savedRange);
-      setTimeout(() => { syncing = false; }, 0);
+    // Always at live end here — history mode returned early above.
+    syncing = true;
+    if (resetView) {
+      chart.timeScale().fitContent();
+      oscChart.timeScale().fitContent();
+      macdChart?.timeScale().fitContent();
     }
+    const total = candles.length;
+    if (total > tf.view) {
+      const fromTime = candles[total - tf.view].time;
+      const toTime   = candles[total - 1].time;
+      chart.timeScale().setVisibleRange({ from: fromTime, to: toTime });
+      oscChart.timeScale().setVisibleRange({ from: fromTime, to: toTime });
+      macdChart?.timeScale().setVisibleRange({ from: fromTime, to: toTime });
+    }
+    setTimeout(() => { syncing = false; }, 0);
 
     if (ticker) updateHeader(ticker, sym);
     updateTimestamp();
