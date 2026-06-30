@@ -2211,7 +2211,7 @@ function buildIndicatorButtons() {
   const allInds = [...OVERLAY_INDS, ...OSC_INDS];
 
   allInds.forEach(ind => {
-    const on  = ind.defaultOn;
+    const on  = indVisible[ind.id];
     const btn = mkBtn('ind-btn', ind.label);
     btn.dataset.ind = ind.id;
     if (on) { setIndBtnOn(btn, ind.color); btn.classList.add('active'); }
