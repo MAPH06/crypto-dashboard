@@ -545,14 +545,14 @@ function initOscChart() {
     syncing = true;
     oscChart.timeScale().setVisibleRange(r);
     macdChart?.timeScale().setVisibleRange(r);
-    setTimeout(() => { syncing = false; }, 0);
+    syncing = false;
   });
   oscChart.timeScale().subscribeVisibleTimeRangeChange(r => {
     if (syncing || !r) return;
     syncing = true;
     chart.timeScale().setVisibleRange(r);
     macdChart?.timeScale().setVisibleRange(r);
-    setTimeout(() => { syncing = false; }, 0);
+    syncing = false;
   });
 
   // Measure tool — click handler
@@ -619,7 +619,7 @@ function initMacdChart() {
     syncing = true;
     chart.timeScale().setVisibleRange(r);
     oscChart.timeScale().setVisibleRange(r);
-    setTimeout(() => { syncing = false; }, 0);
+    syncing = false;
   });
 }
 
@@ -1547,7 +1547,7 @@ async function loadChart(tf, sym, resetView = true) {
       oscChart.timeScale().setVisibleRange({ from: fromTime, to: toTime });
       macdChart?.timeScale().setVisibleRange({ from: fromTime, to: toTime });
     }
-    setTimeout(() => { syncing = false; }, 0);
+    syncing = false;
 
     if (ticker) updateHeader(ticker, sym);
     updateTimestamp();
