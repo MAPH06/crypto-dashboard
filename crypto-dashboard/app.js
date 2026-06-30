@@ -206,26 +206,26 @@ const HALVINGS = [
 
 // ── Historical Bitcoin market cycle phases ───────────────────
 const CYCLE_PHASES = [
-  // Cycle 1
-  { type: 'accum', from: '2012-01-01', to: '2012-10-01' },
-  { type: 'bull',  from: '2012-10-01', to: '2013-11-30' },
-  { type: 'dist',  from: '2013-11-30', to: '2014-02-28' },
-  { type: 'bear',  from: '2014-02-28', to: '2015-08-01' },
-  // Cycle 2
-  { type: 'accum', from: '2015-08-01', to: '2016-05-01' },
-  { type: 'bull',  from: '2016-05-01', to: '2017-12-17' },
-  { type: 'dist',  from: '2017-12-17', to: '2018-02-06' },
-  { type: 'bear',  from: '2018-02-06', to: '2018-12-15' },
-  // Cycle 3
-  { type: 'accum', from: '2018-12-15', to: '2020-02-01' },
-  { type: 'bull',  from: '2020-02-01', to: '2021-11-10' },
+  // Cyclus 1 (2010–2015)
+  { type: 'accum', from: '2010-01-01', to: '2012-11-28' },
+  { type: 'bull',  from: '2012-11-28', to: '2013-11-30' },
+  { type: 'dist',  from: '2013-11-30', to: '2014-01-15' },
+  { type: 'bear',  from: '2014-01-15', to: '2015-01-15' },
+  // Cyclus 2 (2015–2018)
+  { type: 'accum', from: '2015-01-15', to: '2016-07-09' },
+  { type: 'bull',  from: '2016-07-09', to: '2017-12-17' },
+  { type: 'dist',  from: '2017-12-17', to: '2018-01-20' },
+  { type: 'bear',  from: '2018-01-20', to: '2018-12-15' },
+  // Cyclus 3 (2018–2022)
+  { type: 'accum', from: '2018-12-15', to: '2020-05-11' },
+  { type: 'bull',  from: '2020-05-11', to: '2021-11-10' },
   { type: 'dist',  from: '2021-11-10', to: '2022-01-22' },
   { type: 'bear',  from: '2022-01-22', to: '2022-11-21' },
-  // Cycle 4 (deels geschat)
-  { type: 'accum', from: '2022-11-21', to: '2024-02-15' },
-  { type: 'bull',  from: '2024-02-15', to: '2025-10-01' },
-  { type: 'dist',  from: '2025-10-01', to: '2026-02-01' },
-  { type: 'bear',  from: '2026-02-01', to: '2027-06-01' },
+  // Cyclus 4 (2022–2027, lopend/geschat)
+  { type: 'accum', from: '2022-11-21', to: '2024-04-19' },
+  { type: 'bull',  from: '2024-04-19', to: '2025-10-01' },
+  { type: 'dist',  from: '2025-10-01', to: '2026-01-15' },
+  { type: 'bear',  from: '2026-01-15', to: '2027-06-01' },
 ];
 
 const PHASE_COLORS = {
@@ -250,14 +250,38 @@ function drawPhases() {
   if (!indVisible.phases) return;
 
   const vr = chart.timeScale().getVisibleRange();
-  if (!vr) return;
-  const span = vr.to - vr.from;
-  if (span <= 0) return;
+  const lr = chart.timeScale().getVisibleLogicalRange();
+  if (!vr || !lr) return;
 
+  // Convert timestamp → canvas X using bar-index interpolation.
+  // This is accurate regardless of gaps (weekends, exchange downtime) because
+  // LWC maps bar indices linearly to pixels, not raw timestamps.
   const tsToX = ts => {
     const x = chart.timeScale().timeToCoordinate(ts);
     if (x !== null) return x;
-    return (ts - vr.from) / span * W;   // linear extrapolation for off-screen dates
+
+    // Fallback: find fractional bar index via binary search, then map to pixels
+    const cands = currentCandles;
+    if (!cands.length) return (ts - vr.from) / (vr.to - vr.from) * W;
+
+    let logical;
+    if (ts <= cands[0].time) {
+      const dt = cands.length > 1 ? cands[1].time - cands[0].time : 1;
+      logical = (ts - cands[0].time) / dt;
+    } else if (ts >= cands.at(-1).time) {
+      const n = cands.length;
+      const dt = n > 1 ? cands[n - 1].time - cands[n - 2].time : 1;
+      logical = n - 1 + (ts - cands[n - 1].time) / dt;
+    } else {
+      let lo = 0, hi = cands.length - 1;
+      while (lo < hi - 1) {
+        const mid = (lo + hi) >> 1;
+        if (cands[mid].time <= ts) lo = mid; else hi = mid;
+      }
+      const t0 = cands[lo].time, t1 = cands[hi].time;
+      logical = lo + (ts - t0) / (t1 - t0);
+    }
+    return (logical - lr.from) / (lr.to - lr.from) * W;
   };
 
   // Phase bands
@@ -271,37 +295,19 @@ function drawPhases() {
     ctx.fillRect(left, 0, right - left, H);
   });
 
-  // Halving markers — thin purple line + label
+  // Halving markers
   HALVINGS.forEach(h => {
     const x = tsToX(dateToTs(h.date));
-    if (x < 0 || x > W) return;
+    if (x < -1 || x > W + 1) return;
     ctx.strokeStyle = 'rgba(188,140,255,0.70)';
     ctx.lineWidth   = 1.5;
     ctx.setLineDash([4, 3]);
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle  = 'rgba(188,140,255,0.90)';
-    ctx.font       = 'bold 10px ui-monospace,monospace';
-    ctx.textAlign  = 'center';
+    ctx.fillStyle = 'rgba(188,140,255,0.90)';
+    ctx.font      = 'bold 10px ui-monospace,monospace';
+    ctx.textAlign = 'center';
     ctx.fillText(h.label, x, 13);
-  });
-
-  // Phase legend (bottom-left)
-  const legend = [
-    { label: 'Accumulatie', color: PHASE_COLORS.accum },
-    { label: 'Bull Run',    color: PHASE_COLORS.bull  },
-    { label: 'Distributie', color: PHASE_COLORS.dist  },
-    { label: 'Bear Market', color: PHASE_COLORS.bear  },
-  ];
-  let lx = 6, ly = H - 6;
-  ctx.font = '9px ui-monospace,monospace';
-  legend.forEach(l => {
-    ctx.fillStyle = l.color.replace(/[\d.]+\)$/, '0.70)');
-    ctx.fillRect(lx, ly - 9, 10, 10);
-    ctx.fillStyle = 'rgba(139,148,158,0.90)';
-    ctx.textAlign = 'left';
-    ctx.fillText(l.label, lx + 13, ly);
-    lx += ctx.measureText(l.label).width + 28;
   });
 }
 
@@ -418,7 +424,7 @@ function initChart() {
   phasesCanvas = document.createElement('canvas');
   phasesCanvas.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:2;';
   el.appendChild(phasesCanvas);
-  chart.timeScale().subscribeVisibleTimeRangeChange(() => drawPhases());
+  chart.timeScale().subscribeVisibleTimeRangeChange(() => requestAnimationFrame(() => drawPhases()));
 
   // OHLC crosshair tooltip
   chart.subscribeCrosshairMove(param => {
@@ -1648,6 +1654,7 @@ function applyAllVisibility() {
 
   applySwingAndSR();
   applyLiqZones();
+  document.getElementById('phases-legend-hd').classList.toggle('hidden', !indVisible.phases);
   drawPhases();
 }
 
@@ -1663,6 +1670,7 @@ function toggleIndicator(id, visible) {
     return;
   }
   if (id === 'phases') {
+    document.getElementById('phases-legend-hd').classList.toggle('hidden', !visible);
     drawPhases();
     return;
   }
