@@ -248,11 +248,11 @@ function buildSym(base, quote) {
 }
 
 const TIMEFRAMES = [
-  { label: '1M',  interval: '1M',  limit: 1000, view: 36  },
-  { label: '1W',  interval: '1w',  limit:  600, view: 52  },
-  { label: '1D',  interval: '1d',  limit:  600, view: 90  },
-  { label: '4H',  interval: '4h',  limit:  600, view: 120 },
-  { label: '1H',  interval: '1h',  limit:  600, view: 120 },
+  { label: '1M',  interval: '1M',  limit: 1000, view:  60 },
+  { label: '1W',  interval: '1w',  limit: 1000, view: 260 },
+  { label: '1D',  interval: '1d',  limit: 1000, view: 365 },
+  { label: '4H',  interval: '4h',  limit: 1000, view: 180 },
+  { label: '1H',  interval: '1h',  limit: 1000, view: 168 },
   { label: '15m', interval: '15m', limit:  600, view: 120 },
   { label: '5m',  interval: '5m',  limit:  600, view: 120 },
   { label: '3m',  interval: '3m',  limit:  600, view: 120 },
@@ -1607,7 +1607,8 @@ async function loadChart(tf, sym, resetView = true) {
       fetchKlines(sym.symbol, tf.interval, tf.limit),
       fetch24h(sym.symbol),
     ]);
-    const candles = parseKlines(raw);
+    // For 1D/1W/1M prepend CryptoCompare historical candles (pre-Binance period)
+    const candles = await extendWithCCHistory(parseKlines(raw), tf);
 
     // Price chart
     candleSeries.setData(candles);
@@ -1961,6 +1962,107 @@ function updateTimestamp() {
   if (el) el.textContent = new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+// ─── CryptoCompare historical data ──────────────────────────────────────────
+// Fetches OHLCV daily data for the pre-Binance period (before a coin was
+// listed on Binance). Timestamps returned are UTC Unix seconds (not TZ-shifted).
+// Results are cached per base symbol for the session.
+const ccDailyCache = new Map();
+
+async function fetchCCHistoricalDaily(base, endUtcTs) {
+  if (ccDailyCache.has(base)) {
+    return ccDailyCache.get(base).filter(c => c.time <= endUtcTs);
+  }
+  const all  = [];
+  const seen = new Set();
+  let toTs   = endUtcTs;
+  for (let page = 0; page < 3; page++) {          // max 3 × 2000 = 6000 days
+    try {
+      const r = await fetch(
+        `https://min-api.cryptocompare.com/data/v2/histoday` +
+        `?fsym=${encodeURIComponent(base)}&tsym=USD&limit=2000&toTs=${toTs}`
+      );
+      const d = await r.json();
+      if (d.Response !== 'Success') break;
+      const items = (d.Data?.Data ?? []).filter(c => c.close > 0 && !seen.has(c.time));
+      if (!items.length) break;
+      for (const c of items) {
+        seen.add(c.time);
+        all.push({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volumefrom });
+      }
+      const oldest = items[0].time;
+      if (oldest <= 1325376000) break;              // reached 2012-01-01, enough
+      toTs = oldest - 86400;
+    } catch { break; }
+  }
+  all.sort((a, b) => a.time - b.time);
+  ccDailyCache.set(base, all);
+  return all.filter(c => c.time <= endUtcTs);
+}
+
+// Aggregate UTC daily candles → weekly (Monday UTC) with TZ shift applied
+function aggregateDailyToWeekly(daily) {
+  const map = new Map();
+  for (const d of daily) {
+    const dow = new Date(d.time * 1000).getUTCDay();
+    const mon = d.time - (dow === 0 ? 6 : dow - 1) * 86400;
+    if (!map.has(mon)) {
+      map.set(mon, { time: mon, open: d.open, high: d.high, low: d.low, close: d.close, volume: d.volume });
+    } else {
+      const w = map.get(mon);
+      if (d.high > w.high) w.high = d.high;
+      if (d.low  < w.low)  w.low  = d.low;
+      w.close  = d.close;
+      w.volume += d.volume;
+    }
+  }
+  return [...map.values()]
+    .sort((a, b) => a.time - b.time)
+    .map(w => ({ ...w, time: w.time + TZ_OFFSET_SEC }));
+}
+
+// Aggregate UTC daily candles → monthly (1st of month UTC) with TZ shift applied
+function aggregateDailyToMonthly(daily) {
+  const map = new Map();
+  for (const d of daily) {
+    const dt  = new Date(d.time * 1000);
+    const mon = Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), 1) / 1000;
+    if (!map.has(mon)) {
+      map.set(mon, { time: mon, open: d.open, high: d.high, low: d.low, close: d.close, volume: d.volume });
+    } else {
+      const m = map.get(mon);
+      if (d.high > m.high) m.high = d.high;
+      if (d.low  < m.low)  m.low  = d.low;
+      m.close  = d.close;
+      m.volume += d.volume;
+    }
+  }
+  return [...map.values()]
+    .sort((a, b) => a.time - b.time)
+    .map(m => ({ ...m, time: m.time + TZ_OFFSET_SEC }));
+}
+
+// Prepend CryptoCompare historical candles to Binance candles for 1D/1W/1M.
+// For other intervals returns the Binance candles unchanged.
+async function extendWithCCHistory(binanceCandles, tf) {
+  if (!['1d', '1w', '1M'].includes(tf.interval) || !binanceCandles.length) {
+    return binanceCandles;
+  }
+  // Convert the oldest Binance timestamp back to UTC (undo TZ shift)
+  const oldestUtc = binanceCandles[0].time - TZ_OFFSET_SEC;
+  const ccDaily   = await fetchCCHistoricalDaily(currentBase, oldestUtc - 86400);
+  if (!ccDaily.length) return binanceCandles;
+
+  let ccCandles;
+  if      (tf.interval === '1w') ccCandles = aggregateDailyToWeekly(ccDaily);
+  else if (tf.interval === '1M') ccCandles = aggregateDailyToMonthly(ccDaily);
+  else ccCandles = ccDaily.map(c => ({ ...c, time: c.time + TZ_OFFSET_SEC }));
+
+  // Keep only candles strictly older than the oldest Binance candle
+  const prepend = ccCandles.filter(c => c.time < binanceCandles[0].time);
+  return [...prepend, ...binanceCandles];
+}
+
+// ─── Fear & Greed (current) ──────────────────────────────────────────────────
 async function fetchFearGreed() {
   try {
     const r    = await fetch('https://api.alternative.me/fng/?limit=1');
