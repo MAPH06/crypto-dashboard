@@ -2036,8 +2036,13 @@ function drawFGLabels() {
   if (barW < 16) return;
 
   const fontSize = Math.min(11, Math.max(8, Math.floor(barW * 0.4)));
-  ctx.font      = `bold ${fontSize}px ui-monospace, monospace`;
-  ctx.textAlign = 'center';
+  ctx.font         = `bold ${fontSize}px ui-monospace, monospace`;
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'top';
+
+  // Fixed y: top of the F&G band (scaleMargins.top = 0.85) + small padding.
+  // All labels on the same baseline — no more jumping heights.
+  const textY = Math.round(H * 0.855) + 2;
 
   const fromIdx = Math.max(0, Math.floor(lr.from));
   const toIdx   = Math.min(currentCandles.length - 1, Math.ceil(lr.to));
@@ -2054,14 +2059,8 @@ function drawFGLabels() {
     const x = chart.timeScale().timeToCoordinate(c.time);
     if (x === null || x < -barW || x > W + barW) continue;
 
-    const barTopY = ser.fgind.priceToCoordinate(val);
-    if (barTopY === null) continue;
-
-    // Place text just inside the top of the bar; clamp so it stays on screen
-    const textY = Math.min(barTopY + 2, H - fontSize - 2);
-    ctx.fillStyle    = 'rgba(0,0,0,0.55)';
-    ctx.textBaseline = 'top';
-    ctx.fillText(String(val), x + 1, textY + 1); // shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillText(String(val), x + 1, textY + 1); // drop shadow
     ctx.fillStyle = 'rgba(255,255,255,0.92)';
     ctx.fillText(String(val), x, textY);
   }
