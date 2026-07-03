@@ -250,7 +250,7 @@ function buildSym(base, quote) {
 const TIMEFRAMES = [
   { label: '1M',  interval: '1M',  limit: 1000, view:  60 },
   { label: '1W',  interval: '1w',  limit: 1000, view: 260 },
-  { label: '1D',  interval: '1d',  limit: 1000, view: 365 },
+  { label: '1D',  interval: '1d',  limit: 1000, view: 730 },
   { label: '4H',  interval: '4h',  limit: 1000, view: 180 },
   { label: '1H',  interval: '1h',  limit: 1000, view: 168 },
   { label: '15m', interval: '15m', limit:  600, view: 120 },
@@ -1687,7 +1687,10 @@ async function loadChart(tf, sym, resetView = true) {
       macdChart?.timeScale().fitContent();
     }
     const total = candles.length;
-    if (total > tf.view) {
+    // 1W and 1M show full history with fitContent so all CC+Binance candles
+    // are visible at once; all shorter timeframes snap to the last tf.view bars.
+    const snapToView = !['1w', '1M'].includes(tf.interval);
+    if (snapToView && total > tf.view) {
       const fromTime = candles[total - tf.view].time;
       const toTime   = candles[total - 1].time;
       chart.timeScale().setVisibleRange({ from: fromTime, to: toTime });
@@ -1977,20 +1980,23 @@ async function fetchCCHistoricalDaily(base, endUtcTs) {
   let toTs   = endUtcTs;
   for (let page = 0; page < 3; page++) {          // max 3 × 2000 = 6000 days
     try {
+      // Use v1 endpoint — works without an API key; v2 requires authorization.
       const r = await fetch(
-        `https://min-api.cryptocompare.com/data/v2/histoday` +
+        `https://min-api.cryptocompare.com/data/histoday` +
         `?fsym=${encodeURIComponent(base)}&tsym=USD&limit=2000&toTs=${toTs}`
       );
       const d = await r.json();
       if (d.Response !== 'Success') break;
-      const items = (d.Data?.Data ?? []).filter(c => c.close > 0 && !seen.has(c.time));
+      // v1: d.Data is a direct array (v2 would be d.Data.Data)
+      const raw = Array.isArray(d.Data) ? d.Data : (d.Data?.Data ?? []);
+      const items = raw.filter(c => c.close > 0 && !seen.has(c.time));
       if (!items.length) break;
       for (const c of items) {
         seen.add(c.time);
         all.push({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volumefrom });
       }
-      const oldest = items[0].time;
-      if (oldest <= 1325376000) break;              // reached 2012-01-01, enough
+      const oldest = items[0].time;               // v1 returns data oldest-first
+      if (oldest <= 1325376000) break;            // reached 2012-01-01, enough
       toTs = oldest - 86400;
     } catch { break; }
   }
@@ -2044,18 +2050,23 @@ function aggregateDailyToMonthly(daily) {
 // Prepend CryptoCompare historical candles to Binance candles for 1D/1W/1M.
 // For other intervals returns the Binance candles unchanged.
 async function extendWithCCHistory(binanceCandles, tf) {
-  if (!['1d', '1w', '1M'].includes(tf.interval) || !binanceCandles.length) {
-    return binanceCandles;
-  }
-  // Convert the oldest Binance timestamp back to UTC (undo TZ shift)
-  const oldestUtc = binanceCandles[0].time - TZ_OFFSET_SEC;
-  const ccDaily   = await fetchCCHistoricalDaily(currentBase, oldestUtc - 86400);
+  if (!['1d', '1w', '1M'].includes(tf.interval)) return binanceCandles;
+
+  // When Binance has no data (pair not listed), fetch CC up to today.
+  // Otherwise fetch CC ending just before the oldest Binance candle.
+  const ccEndUtcTs = binanceCandles.length
+    ? binanceCandles[0].time - TZ_OFFSET_SEC - 86400
+    : Math.floor(Date.now() / 1000);
+
+  const ccDaily = await fetchCCHistoricalDaily(currentBase, ccEndUtcTs);
   if (!ccDaily.length) return binanceCandles;
 
   let ccCandles;
   if      (tf.interval === '1w') ccCandles = aggregateDailyToWeekly(ccDaily);
   else if (tf.interval === '1M') ccCandles = aggregateDailyToMonthly(ccDaily);
   else ccCandles = ccDaily.map(c => ({ ...c, time: c.time + TZ_OFFSET_SEC }));
+
+  if (!binanceCandles.length) return ccCandles;
 
   // Keep only candles strictly older than the oldest Binance candle
   const prepend = ccCandles.filter(c => c.time < binanceCandles[0].time);
