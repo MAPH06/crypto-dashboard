@@ -286,6 +286,7 @@ const OVERLAY_INDS = [
   { id: 'liq',      label: 'LIQ',       color: '#ffc107',              defaultOn: false },
   { id: 'phases',   label: 'Fases',     color: '#bc8cff',              defaultOn: false },
   { id: 'bambam',   label: 'BamBam',    color: '#f0b429',              defaultOn: false },
+  { id: 'fgind',    label: 'F&G',       color: '#26a641',              defaultOn: false },
 ];
 
 // Oscillator indicators (independent toggles)
@@ -317,6 +318,7 @@ let measureP1     = null;
 let measureLine   = null;
 let phasesCanvas  = null;
 let bambamSignals = [];
+let fgHistMap     = new Map(); // date-string → F&G value (0-100)
 
 // ── Bitcoin halving dates ────────────────────────────────────
 const HALVINGS = [
@@ -536,6 +538,16 @@ function initChart() {
     priceLineVisible: false,
   });
   chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
+
+  // Fear & Greed histogram — overlaid in the same bottom area as volume
+  ser.fgind = chart.addHistogramSeries({
+    priceScaleId:    'fg',
+    lastValueVisible: false,
+    priceLineVisible: false,
+    visible: false,
+    autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 }, margins: { above: 0.05, below: 0 } }),
+  });
+  chart.priceScale('fg').applyOptions({ scaleMargins: { top: 0.85, bottom: 0 }, borderVisible: false });
 
   // Responsive resize
   new ResizeObserver(() => {
@@ -1624,6 +1636,9 @@ async function loadChart(tf, sym, resetView = true) {
       color: c.close >= c.open ? 'rgba(38,166,65,0.45)' : 'rgba(218,54,51,0.45)',
     })));
 
+    // Fear & Greed overlay (uses cached fgHistMap; no-op if not yet loaded)
+    applyFGData(candles);
+
     // Oscillator
     ser.rsi.setData(   calcRSI(candles));
     const stoch = calcStoch(candles);
@@ -1749,6 +1764,7 @@ function applyAllVisibility() {
   ser.ichi_chikou.applyOptions({ visible: ic });
 
   ser.volume.applyOptions({ visible: indVisible.volume });
+  ser.fgind.applyOptions( { visible: indVisible.fgind  });
 
   ser.rsi.applyOptions(      { visible: indVisible.rsi   });
   ser.rsiBand.applyOptions(  { visible: indVisible.rsi   });
@@ -1814,6 +1830,13 @@ function toggleIndicator(id, visible) {
   if (id === 'macd') {
     [ser.macdLine, ser.macdSignal, ser.macdHist].forEach(s => s.applyOptions({ visible }));
     toggleMacdPane(visible);
+    return;
+  }
+  if (id === 'fgind') {
+    ser.fgind.applyOptions({ visible });
+    if (visible && fgHistMap.size === 0) {
+      ensureFGHistory().then(() => applyFGData(currentCandles));
+    }
     return;
   }
   if (id === 'bb') {
@@ -1939,6 +1962,48 @@ async function fetchFearGreed() {
     const el   = document.getElementById('fg-value');
     if (el) { el.textContent = `${val} — ${item.value_classification}`; el.style.color = color; }
   } catch {}
+}
+
+// Fetch full F&G history once; subsequent calls return immediately.
+async function ensureFGHistory() {
+  if (fgHistMap.size > 0) return;
+  try {
+    const r = await fetch('https://api.alternative.me/fng/?limit=2000&format=json');
+    const d = await r.json();
+    (d.data || []).forEach(item => {
+      const ts  = parseInt(item.timestamp, 10);
+      const dt  = new Date(ts * 1000);
+      const key = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth()+1).padStart(2,'0')}-${String(dt.getUTCDate()).padStart(2,'0')}`;
+      fgHistMap.set(key, parseInt(item.value, 10));
+    });
+  } catch {}
+}
+
+function fgDateKey(ts) {
+  const dt = new Date(ts * 1000);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth()+1).padStart(2,'0')}-${String(dt.getUTCDate()).padStart(2,'0')}`;
+}
+
+function fgColorFor(val) {
+  if (val <  25) return 'rgba(218,54,51,0.80)';
+  if (val <  50) return 'rgba(253,126,20,0.80)';
+  if (val <  75) return 'rgba(245,230,66,0.80)';
+  return 'rgba(38,166,65,0.80)';
+}
+
+function applyFGData(candles) {
+  if (!ser.fgind || fgHistMap.size === 0) return;
+  const data = [];
+  for (const c of candles) {
+    // Try exact date, then up to 6 days forward (handles weekly/monthly candles)
+    let val = null;
+    for (let offset = 0; offset <= 6; offset++) {
+      const key = fgDateKey(c.time + offset * 86400);
+      if (fgHistMap.has(key)) { val = fgHistMap.get(key); break; }
+    }
+    if (val !== null) data.push({ time: c.time, value: val, color: fgColorFor(val) });
+  }
+  ser.fgind.setData(data);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2337,6 +2402,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   connectWS(currentSymbol);
   fetchFearGreed();
+  ensureFGHistory(); // fire-and-forget; fills fgHistMap for the F&G overlay
   scheduleTimers();
 
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
