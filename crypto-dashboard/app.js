@@ -682,19 +682,21 @@ function initOscChart() {
     oscChart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
   }).observe(el);
 
-  // Sync time scales using time-based range so all panes align correctly
-  chart.timeScale().subscribeVisibleTimeRangeChange(r => {
+  // Sync panes using LOGICAL range (fires every animation frame, not just on settle).
+  // All three charts anchor their time scale with a series spanning all candle bars,
+  // so logical index N is the same bar in every chart — no drift during scrolling.
+  chart.timeScale().subscribeVisibleLogicalRangeChange(r => {
     if (syncing || !r) return;
     syncing = true;
-    oscChart.timeScale().setVisibleRange(r);
-    macdChart?.timeScale().setVisibleRange(r);
+    oscChart.timeScale().setVisibleLogicalRange(r);
+    macdChart?.timeScale().setVisibleLogicalRange(r);
     syncing = false;
   });
-  oscChart.timeScale().subscribeVisibleTimeRangeChange(r => {
+  oscChart.timeScale().subscribeVisibleLogicalRangeChange(r => {
     if (syncing || !r) return;
     syncing = true;
-    chart.timeScale().setVisibleRange(r);
-    macdChart?.timeScale().setVisibleRange(r);
+    chart.timeScale().setVisibleLogicalRange(r);
+    macdChart?.timeScale().setVisibleLogicalRange(r);
     syncing = false;
   });
 
@@ -764,11 +766,11 @@ function initMacdChart() {
     macdChart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
   }).observe(el);
 
-  macdChart.timeScale().subscribeVisibleTimeRangeChange(r => {
+  macdChart.timeScale().subscribeVisibleLogicalRangeChange(r => {
     if (syncing || !r) return;
     syncing = true;
-    chart.timeScale().setVisibleRange(r);
-    oscChart.timeScale().setVisibleRange(r);
+    chart.timeScale().setVisibleLogicalRange(r);
+    oscChart.timeScale().setVisibleLogicalRange(r);
     syncing = false;
   });
 }
@@ -1973,12 +1975,13 @@ function updateTimestamp() {
 }
 
 // ─── Historical data (Kraken + CryptoCompare fallback) ──────────────────────
-// Kraken's free public OHLC API: no API key, CORS-friendly, BTC/USD since 2013.
-// Weekly: 720 candles ≈ 14 years in one request.
-// Daily:  720 candles per page; fetched backwards from the oldest Binance candle.
+// Historical data sources:
+//   1W / 1M  → Kraken public OHLC (weekly, no API key, goes back to 2013)
+//   1D BTC   → Binance BTCUSDT pagination with endTime (back to 2017, same API)
+//   1D other → CryptoCompare v1 fallback
 const ccDailyCache = new Map();
-let krakenWeeklyCache = null; // cached once per session (UTC, no TZ shift)
-let krakenDailyCache  = null; // cached once per session
+let krakenWeeklyCache  = null; // cached once per session (UTC, no TZ shift)
+let btcDailyCache      = null; // BTCUSDT daily history cache
 
 async function fetchKrakenWeekly() {
   if (krakenWeeklyCache) return krakenWeeklyCache;
@@ -1998,38 +2001,29 @@ async function fetchKrakenWeekly() {
   } catch { return []; }
 }
 
-// Fetch Kraken XBTUSD daily candles going back from endUtcTs.
-// Paginates backwards (max 3 pages × 720 = 2160 days ≈ 6 years).
-// Only used for BTC; other coins fall back to CryptoCompare.
-async function fetchKrakenDaily(endUtcTs) {
-  if (krakenDailyCache) {
-    return krakenDailyCache.filter(c => c.time <= endUtcTs);
-  }
+// Fetch BTCUSDT daily candles from Binance going backwards from oldestOpenMs.
+// Uses the same Binance API as the main chart (no CORS issues, fast, goes to 2017).
+// 4 pages × 1000 candles ≈ 11 years of daily BTC/USD history.
+async function fetchBTCUSDTExtendedDaily(oldestOpenMs) {
+  if (btcDailyCache) return btcDailyCache;
   const all  = [];
-  const seen = new Set();
-  // Work backwards: start page covers from (endUtcTs - 720 days), then keep going
-  let since = endUtcTs - 720 * 86400;
-  for (let page = 0; page < 3; page++) {
+  let endMs  = oldestOpenMs - 1;       // fetch candles ending just before the existing data
+  for (let page = 0; page < 4; page++) {
     try {
       const r = await fetch(
-        `https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1440&since=${since}`
+        `${BINANCE_BASE}/klines?symbol=BTCUSDT&interval=1d&limit=1000&endTime=${endMs}`
       );
-      const d = await r.json();
-      if (d.error?.length || !d.result?.XXBTZUSD?.length) break;
-      for (const [t, o, h, l, c, , v] of d.result.XXBTZUSD) {
-        const ts = Number(t);
-        if (!seen.has(ts) && Number(c) > 0) {
-          seen.add(ts);
-          all.push({ time: ts, open: Number(o), high: Number(h), low: Number(l), close: Number(c), volume: Number(v) });
-        }
-      }
-      since -= 720 * 86400; // step back another 720 days
-      if (d.result.XXBTZUSD.length < 720) break;
+      if (!r.ok) break;
+      const raw = await r.json();
+      if (!raw.length) break;
+      all.push(...parseKlines(raw));
+      endMs = raw[0][0] - 1;           // go before the oldest returned open-time
+      if (raw.length < 1000) break;    // reached the beginning of available data
     } catch { break; }
   }
   all.sort((a, b) => a.time - b.time);
-  krakenDailyCache = all;
-  return all.filter(c => c.time <= endUtcTs);
+  btcDailyCache = all;
+  return all;
 }
 
 async function fetchCCHistoricalDaily(base, endUtcTs) {
@@ -2132,23 +2126,27 @@ async function extendWithCCHistory(binanceCandles, tf) {
     return binanceCandles.length ? [...prepend, ...binanceCandles] : historical;
   }
 
-  // ── 1D: Kraken daily for BTC; CryptoCompare v1 for other coins ──────────
+  // ── 1D: Binance BTCUSDT pagination for BTC; CryptoCompare v1 for other coins ──
+  // BTCUSDT is the most liquid pair and has Binance history back to 2017.
+  // parseKlines already applies TZ_OFFSET_SEC, so no extra shift needed here.
+  if (currentBase === 'BTC' && binanceCandles.length > 0) {
+    const oldestOpenMs = (binanceCandles[0].time - TZ_OFFSET_SEC) * 1000;
+    const historical   = await fetchBTCUSDTExtendedDaily(oldestOpenMs);
+    if (historical.length > 0) {
+      const prepend = historical.filter(c => c.time < binanceCandles[0].time);
+      if (prepend.length > 0) return [...prepend, ...binanceCandles];
+    }
+  }
+
+  // Fallback for other coins: CryptoCompare v1
   const endUtcTs = binanceCandles.length
     ? binanceCandles[0].time - TZ_OFFSET_SEC - 86400
     : Math.floor(Date.now() / 1000);
-
-  let dailyRaw = [];
-  if (currentBase === 'BTC') {
-    dailyRaw = await fetchKrakenDaily(endUtcTs);
-  }
-  if (!dailyRaw.length) {
-    dailyRaw = await fetchCCHistoricalDaily(currentBase, endUtcTs);
-  }
-  if (!dailyRaw.length) return binanceCandles;
-
-  const historical = dailyRaw.map(c => ({ ...c, time: c.time + TZ_OFFSET_SEC }));
-  if (!binanceCandles.length) return historical;
-  const prepend = historical.filter(c => c.time < binanceCandles[0].time);
+  const ccDaily = await fetchCCHistoricalDaily(currentBase, endUtcTs);
+  if (!ccDaily.length) return binanceCandles;
+  const ccCandles = ccDaily.map(c => ({ ...c, time: c.time + TZ_OFFSET_SEC }));
+  if (!binanceCandles.length) return ccCandles;
+  const prepend = ccCandles.filter(c => c.time < binanceCandles[0].time);
   return [...prepend, ...binanceCandles];
 }
 
