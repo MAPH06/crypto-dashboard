@@ -2001,16 +2001,46 @@ function fgColorFor(val) {
   return 'rgba(38,166,65,0.80)';
 }
 
+// Returns the correct F&G value for a candle depending on the active timeframe:
+//   1w  → average of 7 daily values (Mon–Sun)
+//   1M  → average of all days in that calendar month
+//   else → single day value (with ±2-day fallback for any gaps)
+function fgValueForCandle(ts) {
+  const iv = currentTF.interval;
+
+  if (iv === '1w') {
+    const vals = [];
+    for (let d = 0; d < 7; d++) {
+      const key = fgDateKey(ts + d * 86400);
+      if (fgHistMap.has(key)) vals.push(fgHistMap.get(key));
+    }
+    return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+  }
+
+  if (iv === '1M') {
+    const dt = new Date(ts * 1000);
+    const daysInMonth = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth() + 1, 0)).getUTCDate();
+    const vals = [];
+    for (let d = 0; d < daysInMonth; d++) {
+      const key = fgDateKey(ts + d * 86400);
+      if (fgHistMap.has(key)) vals.push(fgHistMap.get(key));
+    }
+    return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+  }
+
+  // Daily / intraday — single day, small forward fallback for any gaps
+  for (let offset = 0; offset <= 2; offset++) {
+    const key = fgDateKey(ts + offset * 86400);
+    if (fgHistMap.has(key)) return fgHistMap.get(key);
+  }
+  return null;
+}
+
 function applyFGData(candles) {
   if (!ser.fgind || fgHistMap.size === 0) return;
   const data = [];
   for (const c of candles) {
-    // Try exact date, then up to 6 days forward (handles weekly/monthly candles)
-    let val = null;
-    for (let offset = 0; offset <= 6; offset++) {
-      const key = fgDateKey(c.time + offset * 86400);
-      if (fgHistMap.has(key)) { val = fgHistMap.get(key); break; }
-    }
+    const val = fgValueForCandle(c.time);
     if (val !== null) data.push({ time: c.time, value: val, color: fgColorFor(val) });
   }
   ser.fgind.setData(data);
@@ -2030,7 +2060,6 @@ function drawFGLabels() {
   const lr = chart.timeScale().getVisibleLogicalRange();
   if (!lr) return;
 
-  // Bar pixel width — skip labels if too narrow to be legible
   const barsInView = Math.max(1, lr.to - lr.from);
   const barW = W / barsInView;
   if (barW < 16) return;
@@ -2040,8 +2069,7 @@ function drawFGLabels() {
   ctx.textAlign    = 'center';
   ctx.textBaseline = 'top';
 
-  // Fixed y: top of the F&G band (scaleMargins.top = 0.85) + small padding.
-  // All labels on the same baseline — no more jumping heights.
+  // Fixed y: top of the F&G band — all labels on the same baseline
   const textY = Math.round(H * 0.855) + 2;
 
   const fromIdx = Math.max(0, Math.floor(lr.from));
@@ -2049,18 +2077,14 @@ function drawFGLabels() {
 
   for (let i = fromIdx; i <= toIdx; i++) {
     const c = currentCandles[i];
-    let val = null;
-    for (let offset = 0; offset <= 6; offset++) {
-      const key = fgDateKey(c.time + offset * 86400);
-      if (fgHistMap.has(key)) { val = fgHistMap.get(key); break; }
-    }
+    const val = fgValueForCandle(c.time);
     if (val === null) continue;
 
     const x = chart.timeScale().timeToCoordinate(c.time);
     if (x === null || x < -barW || x > W + barW) continue;
 
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillText(String(val), x + 1, textY + 1); // drop shadow
+    ctx.fillText(String(val), x + 1, textY + 1);
     ctx.fillStyle = 'rgba(255,255,255,0.92)';
     ctx.fillText(String(val), x, textY);
   }
