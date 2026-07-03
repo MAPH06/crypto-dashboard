@@ -319,6 +319,7 @@ let measureLine   = null;
 let phasesCanvas  = null;
 let bambamSignals = [];
 let fgHistMap     = new Map(); // date-string → F&G value (0-100)
+let fgCanvas      = null;
 
 // ── Bitcoin halving dates ────────────────────────────────────
 const HALVINGS = [
@@ -553,6 +554,7 @@ function initChart() {
   new ResizeObserver(() => {
     chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
     drawPhases();
+    drawFGLabels();
   }).observe(el);
 
   // Phases canvas overlay
@@ -560,6 +562,12 @@ function initChart() {
   phasesCanvas.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:2;';
   el.appendChild(phasesCanvas);
   chart.timeScale().subscribeVisibleTimeRangeChange(() => requestAnimationFrame(() => drawPhases()));
+
+  // F&G label canvas overlay (above phases canvas)
+  fgCanvas = document.createElement('canvas');
+  fgCanvas.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:3;';
+  el.appendChild(fgCanvas);
+  chart.timeScale().subscribeVisibleTimeRangeChange(() => requestAnimationFrame(drawFGLabels));
 
   // OHLC crosshair tooltip
   chart.subscribeCrosshairMove(param => {
@@ -1836,6 +1844,8 @@ function toggleIndicator(id, visible) {
     ser.fgind.applyOptions({ visible });
     if (visible && fgHistMap.size === 0) {
       ensureFGHistory().then(() => applyFGData(currentCandles));
+    } else {
+      requestAnimationFrame(drawFGLabels);
     }
     return;
   }
@@ -2004,6 +2014,57 @@ function applyFGData(candles) {
     if (val !== null) data.push({ time: c.time, value: val, color: fgColorFor(val) });
   }
   ser.fgind.setData(data);
+  requestAnimationFrame(drawFGLabels);
+}
+
+function drawFGLabels() {
+  if (!fgCanvas || !chart || !ser.fgind) return;
+  const container = document.getElementById('chart-container');
+  const W = container.offsetWidth, H = container.offsetHeight;
+  fgCanvas.width  = W;
+  fgCanvas.height = H;
+  const ctx = fgCanvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+  if (!indVisible.fgind || fgHistMap.size === 0 || !currentCandles.length) return;
+
+  const lr = chart.timeScale().getVisibleLogicalRange();
+  if (!lr) return;
+
+  // Bar pixel width — skip labels if too narrow to be legible
+  const barsInView = Math.max(1, lr.to - lr.from);
+  const barW = W / barsInView;
+  if (barW < 16) return;
+
+  const fontSize = Math.min(11, Math.max(8, Math.floor(barW * 0.4)));
+  ctx.font      = `bold ${fontSize}px ui-monospace, monospace`;
+  ctx.textAlign = 'center';
+
+  const fromIdx = Math.max(0, Math.floor(lr.from));
+  const toIdx   = Math.min(currentCandles.length - 1, Math.ceil(lr.to));
+
+  for (let i = fromIdx; i <= toIdx; i++) {
+    const c = currentCandles[i];
+    let val = null;
+    for (let offset = 0; offset <= 6; offset++) {
+      const key = fgDateKey(c.time + offset * 86400);
+      if (fgHistMap.has(key)) { val = fgHistMap.get(key); break; }
+    }
+    if (val === null) continue;
+
+    const x = chart.timeScale().timeToCoordinate(c.time);
+    if (x === null || x < -barW || x > W + barW) continue;
+
+    const barTopY = ser.fgind.priceToCoordinate(val);
+    if (barTopY === null) continue;
+
+    // Place text just inside the top of the bar; clamp so it stays on screen
+    const textY = Math.min(barTopY + 2, H - fontSize - 2);
+    ctx.fillStyle    = 'rgba(0,0,0,0.55)';
+    ctx.textBaseline = 'top';
+    ctx.fillText(String(val), x + 1, textY + 1); // shadow
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.fillText(String(val), x, textY);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
