@@ -2060,9 +2060,19 @@ function drawFGLabels() {
   const lr = chart.timeScale().getVisibleLogicalRange();
   if (!lr) return;
 
-  const barsInView = Math.max(1, lr.to - lr.from);
-  const barW = W / barsInView;
-  if (barW < 16) return;
+  const fromIdx = Math.max(0, Math.floor(lr.from));
+  const toIdx   = Math.min(currentCandles.length - 1, Math.ceil(lr.to));
+
+  // Measure exact bar pixel width from two consecutive visible candles.
+  // timeToCoordinate() returns the LEFT edge of each bar (= open time),
+  // so barW = x[i+1] - x[i] = full bar width.
+  let barW = 0;
+  for (let i = fromIdx + 1; i <= toIdx; i++) {
+    const xa = chart.timeScale().timeToCoordinate(currentCandles[i - 1].time);
+    const xb = chart.timeScale().timeToCoordinate(currentCandles[i].time);
+    if (xa !== null && xb !== null) { barW = Math.abs(xb - xa); break; }
+  }
+  if (barW < 16) return; // too narrow to show labels legibly
 
   const fontSize = Math.min(11, Math.max(8, Math.floor(barW * 0.4)));
   ctx.font         = `bold ${fontSize}px ui-monospace, monospace`;
@@ -2072,21 +2082,21 @@ function drawFGLabels() {
   // Fixed y: top of the F&G band — all labels on the same baseline
   const textY = Math.round(H * 0.855) + 2;
 
-  const fromIdx = Math.max(0, Math.floor(lr.from));
-  const toIdx   = Math.min(currentCandles.length - 1, Math.ceil(lr.to));
-
   for (let i = fromIdx; i <= toIdx; i++) {
     const c = currentCandles[i];
     const val = fgValueForCandle(c.time);
     if (val === null) continue;
 
-    const x = chart.timeScale().timeToCoordinate(c.time);
-    if (x === null || x < -barW || x > W + barW) continue;
+    const xLeft = chart.timeScale().timeToCoordinate(c.time);
+    if (xLeft === null || xLeft > W + barW || xLeft + barW < 0) continue;
+
+    // Centre text inside the bar: left edge + half bar width
+    const cx = xLeft + barW / 2;
 
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillText(String(val), x + 1, textY + 1);
+    ctx.fillText(String(val), cx + 1, textY + 1);
     ctx.fillStyle = 'rgba(255,255,255,0.92)';
-    ctx.fillText(String(val), x, textY);
+    ctx.fillText(String(val), cx, textY);
   }
 }
 
