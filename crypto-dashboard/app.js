@@ -2087,16 +2087,14 @@ function drawFGLabels() {
     const val = fgValueForCandle(c.time);
     if (val === null) continue;
 
-    const xLeft = chart.timeScale().timeToCoordinate(c.time);
-    if (xLeft === null || xLeft > W + barW || xLeft + barW < 0) continue;
-
-    // Centre text inside the bar: left edge + half bar width
-    const cx = xLeft + barW / 2;
+    // timeToCoordinate() returns the bar CENTRE — use directly with textAlign:'center'
+    const x = chart.timeScale().timeToCoordinate(c.time);
+    if (x === null || x < -(barW / 2) || x > W + (barW / 2)) continue;
 
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillText(String(val), cx + 1, textY + 1);
+    ctx.fillText(String(val), x + 1, textY + 1);
     ctx.fillStyle = 'rgba(255,255,255,0.92)';
-    ctx.fillText(String(val), cx, textY);
+    ctx.fillText(String(val), x, textY);
   }
 }
 
