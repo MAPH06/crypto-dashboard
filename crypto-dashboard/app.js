@@ -747,6 +747,13 @@ function initMacdChart() {
   ser.macdLine   = mkLine(macdChart, '#58a6ff', 1.5, false);
   ser.macdSignal = mkLine(macdChart, '#f85149', 1.5, false);
   ser.macdHist   = macdChart.addHistogramSeries({ lastValueVisible: false, priceLineVisible: false });
+  // Invisible anchor: MACD needs ~35 bars warmup so its data starts later than
+  // the main chart. Without an anchor spanning the full range, the MACD chart's
+  // time scale begins at its first real data point and scroll sync drifts.
+  ser.macdAnchor = macdChart.addLineSeries({
+    color: 'rgba(0,0,0,0)', lineWidth: 1,
+    lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
+  });
 
   ser.macdLine.createPriceLine({
     price: 0, color: 'rgba(139,148,158,0.35)', lineWidth: 1,
@@ -1663,6 +1670,8 @@ async function loadChart(tf, sym, resetView = true) {
     ser.macdLine.setData(  macdData.macd);
     ser.macdSignal.setData(macdData.signal);
     ser.macdHist.setData(  macdData.hist);
+    // Anchor: spans all candle times so the MACD time scale aligns with the main chart
+    ser.macdAnchor.setData(candles.map(c => ({ time: c.time, value: 0 })));
 
     // BamBam
     const bbData = calcBamBam(candles);
@@ -1965,10 +1974,11 @@ function updateTimestamp() {
 
 // ─── Historical data (Kraken + CryptoCompare fallback) ──────────────────────
 // Kraken's free public OHLC API: no API key, CORS-friendly, BTC/USD since 2013.
-// 720 weekly candles covers ~14 years — enough for full BTC cycle analysis.
-// CryptoCompare v1 is kept as a fallback for daily data.
+// Weekly: 720 candles ≈ 14 years in one request.
+// Daily:  720 candles per page; fetched backwards from the oldest Binance candle.
 const ccDailyCache = new Map();
 let krakenWeeklyCache = null; // cached once per session (UTC, no TZ shift)
+let krakenDailyCache  = null; // cached once per session
 
 async function fetchKrakenWeekly() {
   if (krakenWeeklyCache) return krakenWeeklyCache;
@@ -1986,6 +1996,40 @@ async function fetchKrakenWeekly() {
       .filter(c => c.close > 0);
     return krakenWeeklyCache;
   } catch { return []; }
+}
+
+// Fetch Kraken XBTUSD daily candles going back from endUtcTs.
+// Paginates backwards (max 3 pages × 720 = 2160 days ≈ 6 years).
+// Only used for BTC; other coins fall back to CryptoCompare.
+async function fetchKrakenDaily(endUtcTs) {
+  if (krakenDailyCache) {
+    return krakenDailyCache.filter(c => c.time <= endUtcTs);
+  }
+  const all  = [];
+  const seen = new Set();
+  // Work backwards: start page covers from (endUtcTs - 720 days), then keep going
+  let since = endUtcTs - 720 * 86400;
+  for (let page = 0; page < 3; page++) {
+    try {
+      const r = await fetch(
+        `https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1440&since=${since}`
+      );
+      const d = await r.json();
+      if (d.error?.length || !d.result?.XXBTZUSD?.length) break;
+      for (const [t, o, h, l, c, , v] of d.result.XXBTZUSD) {
+        const ts = Number(t);
+        if (!seen.has(ts) && Number(c) > 0) {
+          seen.add(ts);
+          all.push({ time: ts, open: Number(o), high: Number(h), low: Number(l), close: Number(c), volume: Number(v) });
+        }
+      }
+      since -= 720 * 86400; // step back another 720 days
+      if (d.result.XXBTZUSD.length < 720) break;
+    } catch { break; }
+  }
+  all.sort((a, b) => a.time - b.time);
+  krakenDailyCache = all;
+  return all.filter(c => c.time <= endUtcTs);
 }
 
 async function fetchCCHistoricalDaily(base, endUtcTs) {
@@ -2088,17 +2132,23 @@ async function extendWithCCHistory(binanceCandles, tf) {
     return binanceCandles.length ? [...prepend, ...binanceCandles] : historical;
   }
 
-  // ── 1D: use CryptoCompare v1 (free, no key on v1 endpoint) ──────────────
-  const ccEndUtcTs = binanceCandles.length
+  // ── 1D: Kraken daily for BTC; CryptoCompare v1 for other coins ──────────
+  const endUtcTs = binanceCandles.length
     ? binanceCandles[0].time - TZ_OFFSET_SEC - 86400
     : Math.floor(Date.now() / 1000);
 
-  const ccDaily = await fetchCCHistoricalDaily(currentBase, ccEndUtcTs);
-  if (!ccDaily.length) return binanceCandles;
+  let dailyRaw = [];
+  if (currentBase === 'BTC') {
+    dailyRaw = await fetchKrakenDaily(endUtcTs);
+  }
+  if (!dailyRaw.length) {
+    dailyRaw = await fetchCCHistoricalDaily(currentBase, endUtcTs);
+  }
+  if (!dailyRaw.length) return binanceCandles;
 
-  const ccCandles = ccDaily.map(c => ({ ...c, time: c.time + TZ_OFFSET_SEC }));
-  if (!binanceCandles.length) return ccCandles;
-  const prepend = ccCandles.filter(c => c.time < binanceCandles[0].time);
+  const historical = dailyRaw.map(c => ({ ...c, time: c.time + TZ_OFFSET_SEC }));
+  if (!binanceCandles.length) return historical;
+  const prepend = historical.filter(c => c.time < binanceCandles[0].time);
   return [...prepend, ...binanceCandles];
 }
 
