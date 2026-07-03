@@ -1680,18 +1680,16 @@ async function loadChart(tf, sym, resetView = true) {
     applyAllVisibility();
 
     // Always at live end here — history mode returned early above.
+    // Use explicit setVisibleRange for all three charts so they are always in sync.
+    // fitContent() is avoided because it recalculates independently per chart,
+    // which causes misalignment when e.g. MACD has fewer data points than the main chart.
     syncing = true;
-    if (resetView) {
-      chart.timeScale().fitContent();
-      oscChart.timeScale().fitContent();
-      macdChart?.timeScale().fitContent();
-    }
     const total = candles.length;
-    // 1W and 1M show full history with fitContent so all CC+Binance candles
-    // are visible at once; all shorter timeframes snap to the last tf.view bars.
-    const snapToView = !['1w', '1M'].includes(tf.interval);
-    if (snapToView && total > tf.view) {
-      const fromTime = candles[total - tf.view].time;
+    if (total > 0) {
+      // 1W and 1M show all available history; other timeframes snap to last tf.view bars.
+      const showFull = ['1w', '1M'].includes(tf.interval);
+      const fromIdx  = (!showFull && total > tf.view) ? total - tf.view : 0;
+      const fromTime = candles[fromIdx].time;
       const toTime   = candles[total - 1].time;
       chart.timeScale().setVisibleRange({ from: fromTime, to: toTime });
       oscChart.timeScale().setVisibleRange({ from: fromTime, to: toTime });
@@ -1965,11 +1963,30 @@ function updateTimestamp() {
   if (el) el.textContent = new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-// ─── CryptoCompare historical data ──────────────────────────────────────────
-// Fetches OHLCV daily data for the pre-Binance period (before a coin was
-// listed on Binance). Timestamps returned are UTC Unix seconds (not TZ-shifted).
-// Results are cached per base symbol for the session.
+// ─── Historical data (Kraken + CryptoCompare fallback) ──────────────────────
+// Kraken's free public OHLC API: no API key, CORS-friendly, BTC/USD since 2013.
+// 720 weekly candles covers ~14 years — enough for full BTC cycle analysis.
+// CryptoCompare v1 is kept as a fallback for daily data.
 const ccDailyCache = new Map();
+let krakenWeeklyCache = null; // cached once per session (UTC, no TZ shift)
+
+async function fetchKrakenWeekly() {
+  if (krakenWeeklyCache) return krakenWeeklyCache;
+  try {
+    const r = await fetch('https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=10080');
+    const d = await r.json();
+    if (d.error?.length) return [];
+    // Each entry: [time, open, high, low, close, vwap, volume, count]
+    const raw = d.result?.XXBTZUSD ?? [];
+    krakenWeeklyCache = raw
+      .map(([t, o, h, l, c, , v]) => ({
+        time: Number(t), open: Number(o), high: Number(h),
+        low: Number(l),  close: Number(c), volume: Number(v),
+      }))
+      .filter(c => c.close > 0);
+    return krakenWeeklyCache;
+  } catch { return []; }
+}
 
 async function fetchCCHistoricalDaily(base, endUtcTs) {
   if (ccDailyCache.has(base)) {
@@ -2047,13 +2064,31 @@ function aggregateDailyToMonthly(daily) {
     .map(m => ({ ...m, time: m.time + TZ_OFFSET_SEC }));
 }
 
-// Prepend CryptoCompare historical candles to Binance candles for 1D/1W/1M.
+// Prepend historical candles (Kraken for 1W/1M, CryptoCompare for 1D).
 // For other intervals returns the Binance candles unchanged.
 async function extendWithCCHistory(binanceCandles, tf) {
   if (!['1d', '1w', '1M'].includes(tf.interval)) return binanceCandles;
 
-  // When Binance has no data (pair not listed), fetch CC up to today.
-  // Otherwise fetch CC ending just before the oldest Binance candle.
+  // ── 1W and 1M: use Kraken public API (no key needed, CORS OK, ~14 years) ──
+  if (tf.interval === '1w' || tf.interval === '1M') {
+    const krakenRaw = await fetchKrakenWeekly(); // UTC timestamps, no TZ shift
+    if (!krakenRaw.length) return binanceCandles;
+
+    let historical;
+    if (tf.interval === '1M') {
+      // Aggregate Kraken weekly candles to monthly (reuses aggregateDailyToMonthly
+      // which accepts any time-ordered OHLCV and outputs with TZ shift applied).
+      historical = aggregateDailyToMonthly(krakenRaw);
+    } else {
+      historical = krakenRaw.map(c => ({ ...c, time: c.time + TZ_OFFSET_SEC }));
+    }
+
+    const cutoff = binanceCandles.length ? binanceCandles[0].time : Infinity;
+    const prepend = historical.filter(c => c.time < cutoff);
+    return binanceCandles.length ? [...prepend, ...binanceCandles] : historical;
+  }
+
+  // ── 1D: use CryptoCompare v1 (free, no key on v1 endpoint) ──────────────
   const ccEndUtcTs = binanceCandles.length
     ? binanceCandles[0].time - TZ_OFFSET_SEC - 86400
     : Math.floor(Date.now() / 1000);
@@ -2061,14 +2096,8 @@ async function extendWithCCHistory(binanceCandles, tf) {
   const ccDaily = await fetchCCHistoricalDaily(currentBase, ccEndUtcTs);
   if (!ccDaily.length) return binanceCandles;
 
-  let ccCandles;
-  if      (tf.interval === '1w') ccCandles = aggregateDailyToWeekly(ccDaily);
-  else if (tf.interval === '1M') ccCandles = aggregateDailyToMonthly(ccDaily);
-  else ccCandles = ccDaily.map(c => ({ ...c, time: c.time + TZ_OFFSET_SEC }));
-
+  const ccCandles = ccDaily.map(c => ({ ...c, time: c.time + TZ_OFFSET_SEC }));
   if (!binanceCandles.length) return ccCandles;
-
-  // Keep only candles strictly older than the oldest Binance candle
   const prepend = ccCandles.filter(c => c.time < binanceCandles[0].time);
   return [...prepend, ...binanceCandles];
 }
