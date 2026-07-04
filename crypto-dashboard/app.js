@@ -1976,12 +1976,12 @@ function updateTimestamp() {
 
 // ─── Historical data (Kraken + CryptoCompare fallback) ──────────────────────
 // Historical data sources:
-//   1W / 1M  → Kraken public OHLC (weekly, no API key, goes back to 2013)
-//   1D BTC   → Binance BTCUSDT pagination with endTime (back to 2017, same API)
+//   1W / 1M  → Kraken public OHLC (weekly, interval=10080, ~14 years)
+//   1D BTC   → Kraken public OHLC (daily,  interval=1440,  ~13 years)
 //   1D other → CryptoCompare v1 fallback
 const ccDailyCache = new Map();
-let krakenWeeklyCache  = null; // cached once per session (UTC, no TZ shift)
-let btcDailyCache      = null; // BTCUSDT daily history cache
+let krakenWeeklyCache = null;
+let krakenDailyCache  = null;
 
 async function fetchKrakenWeekly() {
   if (krakenWeeklyCache) return krakenWeeklyCache;
@@ -2001,28 +2001,34 @@ async function fetchKrakenWeekly() {
   } catch { return []; }
 }
 
-// Fetch BTCUSDT daily candles from Binance going backwards from oldestOpenMs.
-// Uses the same Binance API as the main chart (no CORS issues, fast, goes to 2017).
-// 4 pages × 1000 candles ≈ 11 years of daily BTC/USD history.
-async function fetchBTCUSDTExtendedDaily(oldestOpenMs) {
-  if (btcDailyCache) return btcDailyCache;
-  const all  = [];
-  let endMs  = oldestOpenMs - 1;       // fetch candles ending just before the existing data
-  for (let page = 0; page < 4; page++) {
+// Kraken daily BTC/USD (XBTUSD, interval=1440 min).
+// Paginates forward from the start of Kraken's history (~2013) using result.last.
+// Same proven approach as fetchKrakenWeekly — no API key, CORS OK.
+async function fetchKrakenDaily() {
+  if (krakenDailyCache?.length) return krakenDailyCache;
+  const all = [];
+  let since = 0; // start from earliest available (Kraken BTC/USD ~2013)
+  for (let page = 0; page < 8; page++) {
     try {
       const r = await fetch(
-        `${BINANCE_BASE}/klines?symbol=BTCUSDT&interval=1d&limit=1000&endTime=${endMs}`
+        `https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1440&since=${since}`
       );
-      if (!r.ok) break;
-      const raw = await r.json();
+      const d = await r.json();
+      if (d.error?.length) break;
+      const raw = d.result?.XXBTZUSD ?? [];
       if (!raw.length) break;
-      all.push(...parseKlines(raw));
-      endMs = raw[0][0] - 1;           // go before the oldest returned open-time
-      if (raw.length < 1000) break;    // reached the beginning of available data
+      for (const [t, o, h, l, c, , v] of raw) {
+        if (Number(c) > 0) all.push({
+          time: Number(t), open: Number(o), high: Number(h),
+          low:  Number(l), close: Number(c), volume: Number(v),
+        });
+      }
+      const next = d.result.last;
+      if (!next || next <= since) break;  // no progress — end of data
+      since = next;
     } catch { break; }
   }
-  all.sort((a, b) => a.time - b.time);
-  btcDailyCache = all;
+  krakenDailyCache = all;
   return all;
 }
 
@@ -2126,15 +2132,14 @@ async function extendWithCCHistory(binanceCandles, tf) {
     return binanceCandles.length ? [...prepend, ...binanceCandles] : historical;
   }
 
-  // ── 1D: Binance BTCUSDT pagination for BTC; CryptoCompare v1 for other coins ──
-  // BTCUSDT is the most liquid pair and has Binance history back to 2017.
-  // parseKlines already applies TZ_OFFSET_SEC, so no extra shift needed here.
-  if (currentBase === 'BTC' && binanceCandles.length > 0) {
-    const oldestOpenMs = (binanceCandles[0].time - TZ_OFFSET_SEC) * 1000;
-    const historical   = await fetchBTCUSDTExtendedDaily(oldestOpenMs);
-    if (historical.length > 0) {
-      const prepend = historical.filter(c => c.time < binanceCandles[0].time);
-      if (prepend.length > 0) return [...prepend, ...binanceCandles];
+  // ── 1D BTC: Kraken daily (same approach as 1W/1M — proven, no API key) ──
+  if (currentBase === 'BTC') {
+    const krakenRaw = await fetchKrakenDaily(); // UTC timestamps, no TZ shift yet
+    if (krakenRaw.length) {
+      const historical = krakenRaw.map(c => ({ ...c, time: c.time + TZ_OFFSET_SEC }));
+      const cutoff     = binanceCandles.length ? binanceCandles[0].time : Infinity;
+      const prepend    = historical.filter(c => c.time < cutoff);
+      return binanceCandles.length ? [...prepend, ...binanceCandles] : historical;
     }
   }
 
