@@ -1974,14 +1974,14 @@ function updateTimestamp() {
   if (el) el.textContent = new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-// ─── Historical data (Kraken + CryptoCompare fallback) ──────────────────────
+// ─── Historical data (Kraken + Bitfinex + CryptoCompare fallback) ───────────
 // Historical data sources:
 //   1W / 1M  → Kraken public OHLC (weekly, interval=10080, ~14 years)
-//   1D BTC   → Kraken public OHLC (daily,  interval=1440,  ~13 years)
+//   1D BTC   → Bitfinex public candles API (single call, back to 2013)
 //   1D other → CryptoCompare v1 fallback
 const ccDailyCache = new Map();
-let krakenWeeklyCache = null;
-let krakenDailyCache  = null;
+let krakenWeeklyCache  = null;
+let bitfinexDailyCache = null;
 
 async function fetchKrakenWeekly() {
   if (krakenWeeklyCache) return krakenWeeklyCache;
@@ -2001,35 +2001,31 @@ async function fetchKrakenWeekly() {
   } catch { return []; }
 }
 
-// Kraken daily BTC/USD (XBTUSD, interval=1440 min).
-// Paginates forward from the start of Kraken's history (~2013) using result.last.
-// Same proven approach as fetchKrakenWeekly — no API key, CORS OK.
-async function fetchKrakenDaily() {
-  if (krakenDailyCache?.length) return krakenDailyCache;
-  const all = [];
-  let since = 0; // start from earliest available (Kraken BTC/USD ~2013)
-  for (let page = 0; page < 8; page++) {
-    try {
-      const r = await fetch(
-        `https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1440&since=${since}`
-      );
-      const d = await r.json();
-      if (d.error?.length) break;
-      const raw = d.result?.XXBTZUSD ?? [];
-      if (!raw.length) break;
-      for (const [t, o, h, l, c, , v] of raw) {
-        if (Number(c) > 0) all.push({
-          time: Number(t), open: Number(o), high: Number(h),
-          low:  Number(l), close: Number(c), volume: Number(v),
-        });
-      }
-      const next = d.result.last;
-      if (!next || next <= since) break;  // no progress — end of data
-      since = next;
-    } catch { break; }
-  }
-  krakenDailyCache = all;
-  return all;
+// Bitfinex public candles API — BTC/USD daily, back to March 2013.
+// Single request with limit=5000 covers all history (~4900 days to present).
+// Format per candle: [MTS_ms, OPEN, CLOSE, HIGH, LOW, VOLUME] (note: not OHLCV order)
+// No API key needed. CORS: Access-Control-Allow-Origin: *.
+async function fetchBitfinexDaily() {
+  if (bitfinexDailyCache?.length) return bitfinexDailyCache;
+  try {
+    const r = await fetch(
+      'https://api-pub.bitfinex.com/v2/candles/trade:1D:tBTCUSD/hist?limit=5000&sort=1'
+    );
+    if (!r.ok) return [];
+    const raw = await r.json();
+    if (!Array.isArray(raw)) return [];
+    bitfinexDailyCache = raw
+      .filter(c => c[2] > 0)                    // close (index 2) must be positive
+      .map(c => ({
+        time:   Math.floor(c[0] / 1000),         // ms → UTC seconds (TZ applied in caller)
+        open:   c[1],
+        close:  c[2],
+        high:   c[3],
+        low:    c[4],
+        volume: c[5],
+      }));
+    return bitfinexDailyCache;
+  } catch { return []; }
 }
 
 async function fetchCCHistoricalDaily(base, endUtcTs) {
@@ -2132,11 +2128,11 @@ async function extendWithCCHistory(binanceCandles, tf) {
     return binanceCandles.length ? [...prepend, ...binanceCandles] : historical;
   }
 
-  // ── 1D BTC: Kraken daily (same approach as 1W/1M — proven, no API key) ──
+  // ── 1D BTC: Bitfinex public candles API (back to March 2013, no API key) ──
   if (currentBase === 'BTC') {
-    const krakenRaw = await fetchKrakenDaily(); // UTC timestamps, no TZ shift yet
-    if (krakenRaw.length) {
-      const historical = krakenRaw.map(c => ({ ...c, time: c.time + TZ_OFFSET_SEC }));
+    const bfxRaw = await fetchBitfinexDaily(); // UTC seconds, no TZ shift yet
+    if (bfxRaw.length) {
+      const historical = bfxRaw.map(c => ({ ...c, time: c.time + TZ_OFFSET_SEC }));
       const cutoff     = binanceCandles.length ? binanceCandles[0].time : Infinity;
       const prepend    = historical.filter(c => c.time < cutoff);
       return binanceCandles.length ? [...prepend, ...binanceCandles] : historical;
