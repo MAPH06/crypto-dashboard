@@ -1,4 +1,4 @@
-const CACHE = 'crypto-dash-v55';
+const CACHE = 'crypto-dash-v56';
 const STATIC = [
   './',
   './index.html',

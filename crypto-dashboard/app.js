@@ -4,6 +4,7 @@
 //  CONFIG
 // ═══════════════════════════════════════════════════════════
 
+const APP_VERSION   = 'v56';
 const BINANCE_BASE  = 'https://api.binance.com/api/v3';
 const CHART_REFRESH = 120_000;
 const TREND_REFRESH = 5 * 60_000;
@@ -1971,17 +1972,17 @@ function connectWS(sym) {
 
 function updateTimestamp() {
   const el = document.getElementById('last-update');
-  if (el) el.textContent = new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  if (el) el.textContent = new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' ' + APP_VERSION;
 }
 
-// ─── Historical data (Kraken + Bitfinex + CryptoCompare fallback) ───────────
-// Historical data sources:
-//   1W / 1M  → Kraken public OHLC (weekly, interval=10080, ~14 years)
-//   1D BTC   → Bitfinex public candles API (single call, back to 2013)
-//   1D other → CryptoCompare v1 fallback
+// ─── Historical data ──────────────────────────────────────────────────────────
+// 1W/1M  → Kraken weekly  (interval=10080, no key, CORS OK, back to 2013)
+// 1D BTC → Binance BTCUSDT daily (same API/SW as main chart, back to Aug 2017)
+//           + Kraken weekly for the 2013–2017 pre-BTCUSDT gap (proven working)
+// 1D alt → CryptoCompare v1 fallback
 const ccDailyCache = new Map();
-let krakenWeeklyCache  = null;
-let bitfinexDailyCache = null;
+let krakenWeeklyCache = null;
+let btcDailyCache     = null;
 
 async function fetchKrakenWeekly() {
   if (krakenWeeklyCache) return krakenWeeklyCache;
@@ -2001,31 +2002,28 @@ async function fetchKrakenWeekly() {
   } catch { return []; }
 }
 
-// Bitfinex public candles API — BTC/USD daily, back to March 2013.
-// Single request with limit=5000 covers all history (~4900 days to present).
-// Format per candle: [MTS_ms, OPEN, CLOSE, HIGH, LOW, VOLUME] (note: not OHLCV order)
-// No API key needed. CORS: Access-Control-Allow-Origin: *.
-async function fetchBitfinexDaily() {
-  if (bitfinexDailyCache?.length) return bitfinexDailyCache;
-  try {
-    const r = await fetch(
-      'https://api-pub.bitfinex.com/v2/candles/trade:1D:tBTCUSD/hist?limit=5000&sort=1'
-    );
-    if (!r.ok) return [];
-    const raw = await r.json();
-    if (!Array.isArray(raw)) return [];
-    bitfinexDailyCache = raw
-      .filter(c => c[2] > 0)                    // close (index 2) must be positive
-      .map(c => ({
-        time:   Math.floor(c[0] / 1000),         // ms → UTC seconds (TZ applied in caller)
-        open:   c[1],
-        close:  c[2],
-        high:   c[3],
-        low:    c[4],
-        volume: c[5],
-      }));
-    return bitfinexDailyCache;
-  } catch { return []; }
+// Binance BTCUSDT daily — forward pagination from Aug 2017 to beforeMs.
+// Uses the exact same Binance API/SW path as the main chart: guaranteed to work.
+async function fetchBTCUSDTDaily(beforeMs) {
+  if (btcDailyCache !== null) return btcDailyCache;
+  const all = [];
+  let startMs = 1503878400000; // Aug 1, 2017 — BTCUSDT earliest Binance data
+  for (let page = 0; page < 5; page++) {
+    try {
+      const r = await fetch(
+        `${BINANCE_BASE}/klines?symbol=BTCUSDT&interval=1d&limit=1000` +
+        `&startTime=${startMs}&endTime=${beforeMs}`
+      );
+      if (!r.ok) break;
+      const raw = await r.json();
+      if (!Array.isArray(raw) || !raw.length) break;
+      all.push(...parseKlines(raw));
+      startMs = raw[raw.length - 1][0] + 86400000; // next day after last candle
+      if (raw.length < 1000) break;                 // last page
+    } catch { break; }
+  }
+  btcDailyCache = all;
+  return all;
 }
 
 async function fetchCCHistoricalDaily(base, endUtcTs) {
@@ -2128,13 +2126,28 @@ async function extendWithCCHistory(binanceCandles, tf) {
     return binanceCandles.length ? [...prepend, ...binanceCandles] : historical;
   }
 
-  // ── 1D BTC: Bitfinex public candles API (back to March 2013, no API key) ──
+  // ── 1D BTC: Binance BTCUSDT daily (Aug 2017+) + Kraken weekly (pre-2017) ──
+  // Both sources are confirmed working in the browser (same Binance API/SW as main chart
+  // for BTCUSDT; Kraken weekly already proven for 1W/1M charts).
   if (currentBase === 'BTC') {
-    const bfxRaw = await fetchBitfinexDaily(); // UTC seconds, no TZ shift yet
-    if (bfxRaw.length) {
-      const historical = bfxRaw.map(c => ({ ...c, time: c.time + TZ_OFFSET_SEC }));
-      const cutoff     = binanceCandles.length ? binanceCandles[0].time : Infinity;
-      const prepend    = historical.filter(c => c.time < cutoff);
+    const beforeMs = binanceCandles.length
+      ? (binanceCandles[0].time - TZ_OFFSET_SEC) * 1000
+      : Date.now();
+
+    // Fetch BTCUSDT daily (Aug 2017 → beforeMs) via Binance
+    const daily = await fetchBTCUSDTDaily(beforeMs); // already TZ-shifted by parseKlines
+
+    // Fetch Kraken weekly for the pre-BTCUSDT gap (2013–Aug 2017)
+    const krakenRaw  = await fetchKrakenWeekly();
+    const dailyStart = daily.length ? daily[0].time : Infinity;
+    const weekly = krakenRaw
+      .map(c => ({ ...c, time: c.time + TZ_OFFSET_SEC }))
+      .filter(c => c.time < dailyStart);
+
+    const historical = [...weekly, ...daily];
+    if (historical.length) {
+      const cutoff  = binanceCandles.length ? binanceCandles[0].time : Infinity;
+      const prepend = historical.filter(c => c.time < cutoff);
       return binanceCandles.length ? [...prepend, ...binanceCandles] : historical;
     }
   }
