@@ -4,7 +4,7 @@
 //  CONFIG
 // ═══════════════════════════════════════════════════════════
 
-const APP_VERSION   = 'v56';
+const APP_VERSION   = 'v57';
 const BINANCE_BASE  = 'https://api.binance.com/api/v3';
 const CHART_REFRESH = 120_000;
 const TREND_REFRESH = 5 * 60_000;
@@ -2002,24 +2002,24 @@ async function fetchKrakenWeekly() {
   } catch { return []; }
 }
 
-// Binance BTCUSDT daily — forward pagination from Aug 2017 to beforeMs.
-// Uses the exact same Binance API/SW path as the main chart: guaranteed to work.
-async function fetchBTCUSDTDaily(beforeMs) {
+// Binance BTCUSDT daily — forward pagination from Aug 2017 to now.
+// No endTime: fetches the full history (Aug 2017 → today) in ~3 pages.
+// Used as the primary 1D data source for all BTC pairs (USDT ≈ USD, far more liquid).
+async function fetchBTCUSDTDaily() {
   if (btcDailyCache !== null) return btcDailyCache;
   const all = [];
-  let startMs = 1503878400000; // Aug 1, 2017 — BTCUSDT earliest Binance data
+  let startMs = 1503878400000; // Aug 1, 2017 — BTCUSDT launch on Binance
   for (let page = 0; page < 5; page++) {
     try {
       const r = await fetch(
-        `${BINANCE_BASE}/klines?symbol=BTCUSDT&interval=1d&limit=1000` +
-        `&startTime=${startMs}&endTime=${beforeMs}`
+        `${BINANCE_BASE}/klines?symbol=BTCUSDT&interval=1d&limit=1000&startTime=${startMs}`
       );
       if (!r.ok) break;
       const raw = await r.json();
       if (!Array.isArray(raw) || !raw.length) break;
       all.push(...parseKlines(raw));
-      startMs = raw[raw.length - 1][0] + 86400000; // next day after last candle
-      if (raw.length < 1000) break;                 // last page
+      startMs = raw[raw.length - 1][0] + 86400000;
+      if (raw.length < 1000) break;
     } catch { break; }
   }
   btcDailyCache = all;
@@ -2126,29 +2126,29 @@ async function extendWithCCHistory(binanceCandles, tf) {
     return binanceCandles.length ? [...prepend, ...binanceCandles] : historical;
   }
 
-  // ── 1D BTC: Binance BTCUSDT daily (Aug 2017+) + Kraken weekly (pre-2017) ──
-  // Both sources are confirmed working in the browser (same Binance API/SW as main chart
-  // for BTCUSDT; Kraken weekly already proven for 1W/1M charts).
+  // ── 1D BTC: BTCUSDT daily (Aug 2017 → now) + Kraken weekly (2013–2017) ──
+  // BTCUSDT is far more liquid than BTCUSD/C/EUR and uses the same Binance API/SW.
+  // For BTC/USD we use BTCUSDT as the FULL source (USDT ≈ USD, avoids the tiny-volume
+  // transition when appending the newly-listed BTCUSD pair).
+  // For BTC/USDC and BTC/EUR we prepend BTCUSDT history before the Binance pair data.
   if (currentBase === 'BTC') {
-    const beforeMs = binanceCandles.length
-      ? (binanceCandles[0].time - TZ_OFFSET_SEC) * 1000
-      : Date.now();
-
-    // Fetch BTCUSDT daily (Aug 2017 → beforeMs) via Binance
-    const daily = await fetchBTCUSDTDaily(beforeMs); // already TZ-shifted by parseKlines
-
-    // Fetch Kraken weekly for the pre-BTCUSDT gap (2013–Aug 2017)
+    const daily      = await fetchBTCUSDTDaily();       // TZ-shifted, Aug 2017 → now
     const krakenRaw  = await fetchKrakenWeekly();
     const dailyStart = daily.length ? daily[0].time : Infinity;
-    const weekly = krakenRaw
+    const weekly     = krakenRaw
       .map(c => ({ ...c, time: c.time + TZ_OFFSET_SEC }))
-      .filter(c => c.time < dailyStart);
+      .filter(c => c.time < dailyStart);               // Kraken weekly pre-BTCUSDT gap
 
-    const historical = [...weekly, ...daily];
-    if (historical.length) {
+    if (currentQuote === 'USD') {
+      // Use BTCUSDT as the complete 1D USD dataset — avoids the volume cliff when
+      // switching from BTCUSDT history to the low-liquidity BTCUSD spot pair.
+      const all = [...weekly, ...daily];
+      if (all.length) return all;
+    } else {
+      // USDC / EUR: prepend Kraken+BTCUSDT history, keep the Binance pair for current data
       const cutoff  = binanceCandles.length ? binanceCandles[0].time : Infinity;
-      const prepend = historical.filter(c => c.time < cutoff);
-      return binanceCandles.length ? [...prepend, ...binanceCandles] : historical;
+      const prepend = [...weekly, ...daily].filter(c => c.time < cutoff);
+      if (prepend.length) return binanceCandles.length ? [...prepend, ...binanceCandles] : prepend;
     }
   }
 
