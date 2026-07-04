@@ -4,7 +4,7 @@
 //  CONFIG
 // ═══════════════════════════════════════════════════════════
 
-const APP_VERSION   = 'v57';
+const APP_VERSION   = 'v58';
 const BINANCE_BASE  = 'https://api.binance.com/api/v3';
 const CHART_REFRESH = 120_000;
 const TREND_REFRESH = 5 * 60_000;
@@ -274,28 +274,28 @@ const TREND_TFS = [
 
 // Overlay indicators on the main chart
 const OVERLAY_INDS = [
-  { id: 'ema9',     label: 'EMA9',      color: '#d0d7de',              defaultOn: false },
-  { id: 'sma20',    label: 'SMA20',     color: '#f5e642',              defaultOn: true  },
-  { id: 'sma50',    label: 'SMA50',     color: '#fd7e14',              defaultOn: true  },
-  { id: 'sma200',   label: 'SMA200',    color: '#f85149',              defaultOn: true  },
-  { id: 'bb',       label: 'Bollinger', color: '#79c0ff',              defaultOn: false },
-  { id: 'psar',     label: 'PSAR',      color: '#f0b429',              defaultOn: false },
-  { id: 'ichimoku', label: 'Ichimoku',  color: '#bc8cff',              defaultOn: false },
-  { id: 'volume',   label: 'Volume',    color: '#26a641',              defaultOn: true  },
-  { id: 'swing',    label: 'Swing',     color: '#bc8cff',              defaultOn: false },
-  { id: 'sr',       label: 'S/R',       color: '#58a6ff',              defaultOn: false },
-  { id: 'liq',      label: 'LIQ',       color: '#ffc107',              defaultOn: false },
-  { id: 'phases',   label: 'Fases',     color: '#bc8cff',              defaultOn: false },
-  { id: 'bambam',   label: 'BamBam',    color: '#f0b429',              defaultOn: false },
-  { id: 'fgind',    label: 'F&G',       color: '#26a641',              defaultOn: false },
+  { id: 'ema9',     label: 'EMA9',      color: '#d0d7de', defaultOn: false },
+  { id: 'sma20',    label: 'SMA20',     color: '#f5e642', defaultOn: true  },
+  { id: 'sma50',    label: 'SMA50',     color: '#fd7e14', defaultOn: true  },
+  { id: 'sma200',   label: 'SMA200',    color: '#f85149', defaultOn: true  },
+  { id: 'bb',       label: 'Bollinger', color: '#79c0ff', defaultOn: false },
+  { id: 'phases',   label: 'Fases',     color: '#bc8cff', defaultOn: false },
+  { id: 'volume',   label: 'Volume',    color: '#26a641', defaultOn: true  },
+  { id: 'fgind',    label: 'F&G',       color: '#26a641', defaultOn: false },
+  { id: 'rsi',      label: 'RSI',       color: '#e3b341', defaultOn: true  },
+  { id: 'stoch',    label: 'Stoch',     color: '#58a6ff', defaultOn: true  },
+  { id: 'macd',     label: 'MACD',      color: '#bc8cff', defaultOn: false },
+  { id: 'psar',     label: 'PSAR',      color: '#f0b429', defaultOn: false },
+  { id: 'kc',       label: 'KC',        color: '#3fb950', defaultOn: false },
+  { id: 'ichimoku', label: 'Ichimoku',  color: '#bc8cff', defaultOn: false },
+  { id: 'swing',    label: 'Swing',     color: '#bc8cff', defaultOn: false },
+  { id: 'sr',       label: 'S/R',       color: '#58a6ff', defaultOn: false },
+  { id: 'liq',      label: 'LIQ',       color: '#ffc107', defaultOn: false },
+  { id: 'bambam',   label: 'BamBam',    color: '#f0b429', defaultOn: false },
 ];
 
-// Oscillator indicators (independent toggles)
-const OSC_INDS = [
-  { id: 'rsi',   label: 'RSI',   color: '#e3b341', defaultOn: true  },
-  { id: 'stoch', label: 'Stoch', color: '#58a6ff', defaultOn: true  },
-  { id: 'macd',  label: 'MACD',  color: '#bc8cff', defaultOn: false },
-];
+// Oscillator indicators — merged into OVERLAY_INDS for button ordering
+const OSC_INDS = [];
 
 // ═══════════════════════════════════════════════════════════
 //  STATE
@@ -516,6 +516,11 @@ function initChart() {
   ser.bb_upper  = mkLine(chart, 'rgba(121,192,255,0.8)', 1, false, true);
   ser.bb_mid    = mkLine(chart, 'rgba(121,192,255,0.4)', 1, false, true);
   ser.bb_lower  = mkLine(chart, 'rgba(121,192,255,0.8)', 1, false, true);
+
+  // Keltner Channels (3 lines, default hidden)
+  ser.kc_upper  = mkLine(chart, 'rgba(63,185,80,0.8)', 1, false, true);
+  ser.kc_mid    = mkLine(chart, 'rgba(63,185,80,0.4)', 1, false, true);
+  ser.kc_lower  = mkLine(chart, 'rgba(63,185,80,0.8)', 1, false, true);
 
   // PSAR — two dot-only series (bull = green dots below price, bear = red dots above)
   const mkDots = (color) => chart.addLineSeries({
@@ -884,6 +889,36 @@ function calcBB(candles, period = 20, mult = 2) {
     upper.push({ time: t, value: mean + mult * std });
     mid.push(  { time: t, value: mean });
     lower.push({ time: t, value: mean - mult * std });
+  }
+  return { upper, mid, lower };
+}
+
+function calcKC(candles, emaPeriod = 20, atrPeriod = 10, mult = 2) {
+  if (candles.length < Math.max(emaPeriod, atrPeriod + 1)) return { upper: [], mid: [], lower: [] };
+  // EMA(emaPeriod) for the middle line
+  const k = 2 / (emaPeriod + 1);
+  let ema = candles.slice(0, emaPeriod).reduce((s, c) => s + c.close, 0) / emaPeriod;
+  // Wilder's RMA for ATR: seed with average of first atrPeriod true ranges
+  const trAt = (i) => {
+    const c = candles[i], p = candles[i - 1];
+    return Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close));
+  };
+  let atr = 0;
+  for (let i = 1; i <= atrPeriod; i++) atr += trAt(i);
+  atr /= atrPeriod;
+  const alpha = 1 / atrPeriod;
+  const upper = [], mid = [], lower = [];
+  // Start outputting once both EMA and ATR are seeded
+  const start = Math.max(emaPeriod, atrPeriod + 1);
+  for (let i = 1; i < candles.length; i++) {
+    ema = candles[i].close * k + ema * (1 - k);
+    if (i >= atrPeriod + 1) atr = trAt(i) * alpha + atr * (1 - alpha);
+    if (i >= start - 1) {
+      const t = candles[i].time;
+      upper.push({ time: t, value: ema + mult * atr });
+      mid.push(  { time: t, value: ema });
+      lower.push({ time: t, value: ema - mult * atr });
+    }
   }
   return { upper, mid, lower };
 }
@@ -1636,6 +1671,12 @@ async function loadChart(tf, sym, resetView = true) {
     ser.bb_mid.setData(  bb.mid);
     ser.bb_lower.setData(bb.lower);
 
+    // Keltner Channels
+    const kc = calcKC(candles);
+    ser.kc_upper.setData(kc.upper);
+    ser.kc_mid.setData(  kc.mid);
+    ser.kc_lower.setData(kc.lower);
+
     // PSAR
     const psar = calcPSAR(candles);
     ser.psar_bull.setData(psar.bull);
@@ -1865,6 +1906,10 @@ function toggleIndicator(id, visible) {
   }
   if (id === 'bb') {
     [ser.bb_upper, ser.bb_mid, ser.bb_lower].forEach(s => s.applyOptions({ visible }));
+    return;
+  }
+  if (id === 'kc') {
+    [ser.kc_upper, ser.kc_mid, ser.kc_lower].forEach(s => s.applyOptions({ visible }));
     return;
   }
   if (id === 'psar') {
