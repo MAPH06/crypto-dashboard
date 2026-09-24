@@ -4,7 +4,7 @@
 //  CONFIG
 // ═══════════════════════════════════════════════════════════
 
-const APP_VERSION   = 'v58';
+const APP_VERSION   = 'v59';
 const BINANCE_BASE  = 'https://api.binance.com/api/v3';
 const CHART_REFRESH = 120_000;
 const TREND_REFRESH = 5 * 60_000;
@@ -692,6 +692,7 @@ function initOscChart() {
   // All three charts anchor their time scale with a series spanning all candle bars,
   // so logical index N is the same bar in every chart — no drift during scrolling.
   chart.timeScale().subscribeVisibleLogicalRangeChange(r => {
+    scheduleScaleSync();
     if (syncing || !r) return;
     syncing = true;
     oscChart.timeScale().setVisibleLogicalRange(r);
@@ -779,6 +780,46 @@ function initMacdChart() {
     oscChart.timeScale().setVisibleLogicalRange(r);
     syncing = false;
   });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  PRICE SCALE WIDTH SYNC
+// ═══════════════════════════════════════════════════════════
+// Each pane sizes its right price scale to its own labels (e.g. "84,110.61" vs
+// "70.00"), so the plot areas end at different x-positions and the panes look
+// shifted against each other. Force every visible pane to the widest scale.
+
+let scaleSyncPending = false;
+
+function syncPriceScaleWidths(reset = false) {
+  const panes = [
+    [chart,     'chart-container'],
+    [oscChart,  'osc-container'],
+    [macdChart, 'macd-container'],
+  ].filter(([c, id]) => c && document.getElementById(id)?.offsetParent !== null)
+   .map(([c]) => c);
+  if (panes.length === 0) return;
+
+  if (reset) {
+    // Drop old minimums (e.g. after a coin switch) so scales can shrink again,
+    // then re-measure once the charts have rendered their natural widths.
+    [chart, oscChart, macdChart].forEach(c => c?.priceScale('right').applyOptions({ minimumWidth: 0 }));
+    requestAnimationFrame(() => requestAnimationFrame(() => syncPriceScaleWidths()));
+    return;
+  }
+
+  const widths = panes.map(c => c.priceScale('right').width());
+  const max    = Math.max(...widths);
+  if (max > 0 && widths.some(w => w !== max)) {
+    [chart, oscChart, macdChart].forEach(c => c?.priceScale('right').applyOptions({ minimumWidth: max }));
+  }
+}
+
+// Throttled check — label widths can change while scrolling/zooming.
+function scheduleScaleSync() {
+  if (scaleSyncPending) return;
+  scaleSyncPending = true;
+  requestAnimationFrame(() => { scaleSyncPending = false; syncPriceScaleWidths(); });
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1749,6 +1790,7 @@ async function loadChart(tf, sym, resetView = true) {
       macdChart?.timeScale().setVisibleRange({ from: fromTime, to: toTime });
     }
     syncing = false;
+    syncPriceScaleWidths(resetView);
 
     if (ticker) updateHeader(ticker, sym);
     updateTimestamp();
@@ -1940,6 +1982,7 @@ function toggleOscPane(visible) {
       const oc = document.getElementById('osc-container');
       oscChart?.applyOptions({ width: oc.clientWidth, height: oc.clientHeight });
     }
+    syncPriceScaleWidths(true);
   });
 }
 
@@ -1952,6 +1995,7 @@ function toggleMacdPane(visible) {
       const mc2 = document.getElementById('macd-container');
       macdChart?.applyOptions({ width: mc2.clientWidth, height: mc2.clientHeight });
     }
+    syncPriceScaleWidths(true);
   });
 }
 
@@ -2722,6 +2766,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initChart();
   initOscChart();
   initMacdChart();
+  setInterval(syncPriceScaleWidths, 1000);  // catch-all for label changes on live updates
   buildPairSelector();
   buildTFButtons();
   buildChartTypeButtons();
