@@ -4,7 +4,7 @@
 //  CONFIG
 // ═══════════════════════════════════════════════════════════
 
-const APP_VERSION   = 'v60';
+const APP_VERSION   = 'v61';
 const BINANCE_BASE  = 'https://api.binance.com/api/v3';
 const CHART_REFRESH = 120_000;
 const TREND_REFRESH = 5 * 60_000;
@@ -1883,6 +1883,13 @@ async function loadChart(tf, sym, resetView = true) {
       macdChart?.timeScale().setVisibleRange({ from: fromTime, to: toTime });
     }
     syncing = false;
+
+    // Dragging a price axis turns autoScale off; it then keeps the old price range
+    // (e.g. BTC ~84k after switching to ETH ~3k → empty chart). Re-enable it on
+    // every coin/timeframe switch so the view jumps to the current price level.
+    if (resetView) {
+      [chart, oscChart, macdChart].forEach(c => c?.priceScale('right').applyOptions({ autoScale: true }));
+    }
     syncPriceScaleWidths(resetView);
 
     if (ticker) updateHeader(ticker, sym);
