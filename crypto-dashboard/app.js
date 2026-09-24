@@ -4,7 +4,7 @@
 //  CONFIG
 // ═══════════════════════════════════════════════════════════
 
-const APP_VERSION   = 'v59';
+const APP_VERSION   = 'v60';
 const BINANCE_BASE  = 'https://api.binance.com/api/v3';
 const CHART_REFRESH = 120_000;
 const TREND_REFRESH = 5 * 60_000;
@@ -251,6 +251,12 @@ function buildSym(base, quote) {
 const TIMEFRAMES = [
   { label: '1M',  interval: '1M',  limit: 1000, view:  60 },
   { label: '1W',  interval: '1w',  limit: 1000, view: 260 },
+  // 5D/3D are built from 1D candles (src) aggregated per N days, so they get the
+  // same extended history as 1D. `preset` sets indicators when the TF is selected.
+  { label: '5D',  interval: '5d',  src: '1d', days: 5, limit: 1000, view: 220,
+    preset: { ema9: false, sma20: false, sma50: false, sma200: false, bb: false, gc: true } },
+  { label: '3D',  interval: '3d',  src: '1d', days: 3, limit: 1000, view: 245,
+    preset: { ema9: false, sma20: true,  sma50: false, sma200: true,  bb: false } },
   { label: '1D',  interval: '1d',  limit: 1000, view: 730 },
   { label: '4H',  interval: '4h',  limit: 1000, view: 180 },
   { label: '1H',  interval: '1h',  limit: 1000, view: 168 },
@@ -263,6 +269,8 @@ const TIMEFRAMES = [
 const TREND_TFS = [
   { label: '1M',  interval: '1M'  },
   { label: '1W',  interval: '1w'  },
+  { label: '5D',  interval: '5d', src: '1d', days: 5 },
+  { label: '3D',  interval: '3d', src: '1d', days: 3 },
   { label: '1D',  interval: '1d'  },
   { label: '4H',  interval: '4h'  },
   { label: '1H',  interval: '1h'  },
@@ -286,7 +294,8 @@ const OVERLAY_INDS = [
   { id: 'stoch',    label: 'Stoch',     color: '#58a6ff', defaultOn: true  },
   { id: 'macd',     label: 'MACD',      color: '#bc8cff', defaultOn: false },
   { id: 'psar',     label: 'PSAR',      color: '#f0b429', defaultOn: false },
-  { id: 'kc',       label: 'KC',        color: '#3fb950', defaultOn: false },
+  { id: 'kc',       label: 'KC',        color: '#7dd3fc', defaultOn: false },
+  { id: 'gc',       label: 'GC',        color: '#3fb950', defaultOn: false },
   { id: 'ichimoku', label: 'Ichimoku',  color: '#bc8cff', defaultOn: false },
   { id: 'swing',    label: 'Swing',     color: '#bc8cff', defaultOn: false },
   { id: 'sr',       label: 'S/R',       color: '#58a6ff', defaultOn: false },
@@ -518,9 +527,14 @@ function initChart() {
   ser.bb_lower  = mkLine(chart, 'rgba(121,192,255,0.8)', 1, false, true);
 
   // Keltner Channels (3 lines, default hidden)
-  ser.kc_upper  = mkLine(chart, 'rgba(63,185,80,0.8)', 1, false, true);
-  ser.kc_mid    = mkLine(chart, 'rgba(63,185,80,0.4)', 1, false, true);
-  ser.kc_lower  = mkLine(chart, 'rgba(63,185,80,0.8)', 1, false, true);
+  ser.kc_upper  = mkLine(chart, 'rgba(125,211,252,0.8)', 1, false, true);
+  ser.kc_mid    = mkLine(chart, 'rgba(125,211,252,0.4)', 1, false, true);
+  ser.kc_lower  = mkLine(chart, 'rgba(125,211,252,0.8)', 1, false, true);
+
+  // Gaussian Channel (3 lines, default hidden) — colours set per point (rising/falling)
+  ser.gc_upper  = mkLine(chart, '#3fb950', 1, false, true);
+  ser.gc_mid    = mkLine(chart, '#3fb950', 2, false, true);
+  ser.gc_lower  = mkLine(chart, '#3fb950', 1, false, true);
 
   // PSAR — two dot-only series (bull = green dots below price, bear = red dots above)
   const mkDots = (color) => chart.addLineSeries({
@@ -843,6 +857,32 @@ async function fetch24h(symbol) {
 // uses these shifted values consistently.
 const TZ_OFFSET_SEC = -new Date().getTimezoneOffset() * 60;
 
+// Aggregate daily candles into N-day candles. Buckets are anchored on the Unix
+// epoch (UTC day number), so they stay fixed across refreshes and coin switches.
+function aggregateDays(candles, days) {
+  // Drop a leading non-daily prefix (e.g. Kraken weekly history before BTCUSDT daily)
+  let i = 0;
+  while (i < candles.length - 1 && candles[i + 1].time - candles[i].time > 1.5 * 86400) i++;
+  const out = [];
+  let cur = null, curKey = null;
+  for (; i < candles.length; i++) {
+    const c   = candles[i];
+    const day = Math.floor((c.time - TZ_OFFSET_SEC) / 86400);
+    const key = Math.floor(day / days) * days;
+    if (key !== curKey) {
+      curKey = key;
+      cur = { time: key * 86400 + TZ_OFFSET_SEC, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume };
+      out.push(cur);
+    } else {
+      if (c.high > cur.high) cur.high = c.high;
+      if (c.low  < cur.low)  cur.low  = c.low;
+      cur.close   = c.close;
+      cur.volume += c.volume;
+    }
+  }
+  return out;
+}
+
 function parseKlines(raw) {
   return raw.map(k => ({
     time:   Math.floor(k[0] / 1000) + TZ_OFFSET_SEC,
@@ -960,6 +1000,50 @@ function calcKC(candles, emaPeriod = 20, atrPeriod = 10, mult = 2) {
       mid.push(  { time: t, value: ema });
       lower.push({ time: t, value: ema - mult * atr });
     }
+  }
+  return { upper, mid, lower };
+}
+
+// Gaussian Channel (DonovanWall): N-pole Gaussian filter of hlc3, bands at
+// ± mult × filtered true range. Coloured green while the filter rises, red while it falls.
+function calcGC(candles, period = 144, poles = 4, mult = 1.414) {
+  if (candles.length < 2) return { upper: [], mid: [], lower: [] };
+  const beta  = (1 - Math.cos(2 * Math.PI / period)) / (Math.pow(1.414, 2 / poles) - 1);
+  const alpha = -beta + Math.sqrt(beta * beta + 2 * beta);
+  const x = 1 - alpha;
+  // Binomial coefficients for the N-pole recursion
+  const coef = [];
+  for (let k = 1, c = 1; k <= poles; k++) {
+    c = c * (poles - k + 1) / k;
+    coef.push((k % 2 ? 1 : -1) * c * Math.pow(x, k));
+  }
+  const aN = Math.pow(alpha, poles);
+  // Seed history with the first input value instead of 0 to avoid a long ramp-up from zero
+  const filter = (src) => {
+    const hist = new Array(poles).fill(src[0]);   // hist[0] = f[i-1], hist[1] = f[i-2], ...
+    return src.map(v => {
+      let f = aN * v;
+      for (let k = 0; k < poles; k++) f += coef[k] * hist[k];
+      hist.pop(); hist.unshift(f);
+      return f;
+    });
+  };
+  const src = candles.map(c => (c.high + c.low + c.close) / 3);
+  const tr  = candles.map((c, i) => i === 0 ? c.high - c.low
+    : Math.max(c.high - c.low, Math.abs(c.high - candles[i - 1].close), Math.abs(c.low - candles[i - 1].close)));
+  const filt = filter(src), ftr = filter(tr);
+
+  const upper = [], mid = [], lower = [];
+  // Skip the warm-up period while the filter settles
+  const start = Math.min(period, candles.length - 1);
+  for (let i = Math.max(start, 1); i < candles.length; i++) {
+    const t = candles[i].time;
+    const up = filt[i] >= filt[i - 1];
+    const col  = up ? '#3fb950' : '#f85149';
+    const bcol = up ? 'rgba(63,185,80,0.6)' : 'rgba(248,81,73,0.6)';
+    upper.push({ time: t, value: filt[i] + mult * ftr[i], color: bcol });
+    mid.push(  { time: t, value: filt[i],                 color: col  });
+    lower.push({ time: t, value: filt[i] - mult * ftr[i], color: bcol });
   }
   return { upper, mid, lower };
 }
@@ -1690,11 +1774,14 @@ async function loadChart(tf, sym, resetView = true) {
     }
 
     const [raw, ticker] = await Promise.all([
-      fetchKlines(sym.symbol, tf.interval, tf.limit),
+      fetchKlines(sym.symbol, tf.src ?? tf.interval, tf.limit),
       fetch24h(sym.symbol),
     ]);
-    // For 1D/1W/1M prepend CryptoCompare historical candles (pre-Binance period)
-    const candles = await extendWithCCHistory(parseKlines(raw), tf);
+    // For 1D/1W/1M prepend CryptoCompare historical candles (pre-Binance period).
+    // Derived timeframes (5D) extend their source interval, then aggregate.
+    const srcTf   = tf.src ? { ...tf, interval: tf.src } : tf;
+    let   candles = await extendWithCCHistory(parseKlines(raw), srcTf);
+    if (tf.days) candles = aggregateDays(candles, tf.days);
 
     // Price chart
     candleSeries.setData(candles);
@@ -1717,6 +1804,12 @@ async function loadChart(tf, sym, resetView = true) {
     ser.kc_upper.setData(kc.upper);
     ser.kc_mid.setData(  kc.mid);
     ser.kc_lower.setData(kc.lower);
+
+    // Gaussian Channel
+    const gc = calcGC(candles);
+    ser.gc_upper.setData(gc.upper);
+    ser.gc_mid.setData(  gc.mid);
+    ser.gc_lower.setData(gc.lower);
 
     // PSAR
     const psar = calcPSAR(candles);
@@ -1857,6 +1950,9 @@ function applyAllVisibility() {
   ser.bb_mid.applyOptions(  { visible: bb });
   ser.bb_lower.applyOptions({ visible: bb });
 
+  [ser.kc_upper, ser.kc_mid, ser.kc_lower].forEach(s => s.applyOptions({ visible: indVisible.kc }));
+  [ser.gc_upper, ser.gc_mid, ser.gc_lower].forEach(s => s.applyOptions({ visible: indVisible.gc }));
+
   const ps = indVisible.psar;
   ser.psar_bull.applyOptions({ visible: ps });
   ser.psar_bear.applyOptions({ visible: ps });
@@ -1952,6 +2048,10 @@ function toggleIndicator(id, visible) {
   }
   if (id === 'kc') {
     [ser.kc_upper, ser.kc_mid, ser.kc_lower].forEach(s => s.applyOptions({ visible }));
+    return;
+  }
+  if (id === 'gc') {
+    [ser.gc_upper, ser.gc_mid, ser.gc_lower].forEach(s => s.applyOptions({ visible }));
     return;
   }
   if (id === 'psar') {
@@ -2295,15 +2395,16 @@ function fgColorFor(val) {
 }
 
 // Returns the correct F&G value for a candle depending on the active timeframe:
-//   1w  → average of 7 daily values (Mon–Sun)
+//   1w  → average of 7 daily values (Mon–Sun), 5d/3d → average of its 5/3 days
 //   1M  → average of all days in that calendar month
 //   else → single day value (with ±2-day fallback for any gaps)
 function fgValueForCandle(ts) {
   const iv = currentTF.interval;
 
-  if (iv === '1w') {
+  if (iv === '1w' || iv === '5d' || iv === '3d') {
+    const n = currentTF.days ?? 7;
     const vals = [];
-    for (let d = 0; d < 7; d++) {
+    for (let d = 0; d < n; d++) {
       const key = fgDateKey(ts + d * 86400);
       if (fgHistMap.has(key)) vals.push(fgHistMap.get(key));
     }
@@ -2473,8 +2574,11 @@ function maTrendOrderHtml(candles) {
 async function updateTrendPanel(symbol) {
   const rows = await Promise.all(
     TREND_TFS.map(tf =>
-      fetchKlines(symbol, tf.interval, 1000)
-        .then(raw => ({ label: tf.label, candles: parseKlines(raw) }))
+      fetchKlines(symbol, tf.src ?? tf.interval, 1000)
+        .then(raw => {
+          const c = parseKlines(raw);
+          return { label: tf.label, candles: tf.days ? aggregateDays(c, tf.days) : c };
+        })
         .catch(() => ({ label: tf.label, candles: [] }))
     )
   );
@@ -2636,6 +2740,7 @@ function buildTFButtons() {
       grp.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       savePrefs({ tf: tf.interval });
+      if (tf.preset) applyIndicatorPreset(tf.preset);
       resetTimers();
       await loadChart(tf, currentSymbol);
       scheduleTimers();
@@ -2674,6 +2779,20 @@ function buildIndicatorButtons() {
       else       setIndBtnOff(btn);
     });
     grp.appendChild(btn);
+  });
+}
+
+// Switch indicators to the given on/off states and keep the buttons in sync.
+function applyIndicatorPreset(preset) {
+  const allInds = [...OVERLAY_INDS, ...OSC_INDS];
+  Object.entries(preset).forEach(([id, on]) => {
+    if (indVisible[id] === on) return;
+    toggleIndicator(id, on);
+    const btn = document.querySelector(`#indicator-buttons .ind-btn[data-ind="${id}"]`);
+    if (!btn) return;
+    btn.classList.toggle('active', on);
+    if (on) setIndBtnOn(btn, allInds.find(i => i.id === id).color);
+    else    setIndBtnOff(btn);
   });
 }
 
