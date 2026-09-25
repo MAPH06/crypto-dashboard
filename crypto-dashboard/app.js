@@ -4,7 +4,7 @@
 //  CONFIG
 // ═══════════════════════════════════════════════════════════
 
-const APP_VERSION   = 'v62';
+const APP_VERSION   = 'v63';
 const BINANCE_BASE  = 'https://api.binance.com/api/v3';
 const CHART_REFRESH = 120_000;
 const TREND_REFRESH = 5 * 60_000;
@@ -2892,6 +2892,13 @@ function fmtTime(t, iv) {
 // ═══════════════════════════════════════════════════════════
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Bots dashboard: via Tailscale (tailscale serve → 127.0.0.1:5055 on the bot PC),
+  // so it also works from tablet/phone. When this dashboard itself is served
+  // locally on the bot PC, go straight to the local address.
+  if (['127.0.0.1', 'localhost'].includes(location.hostname)) {
+    document.getElementById('bots-btn').href = 'http://127.0.0.1:5055/';
+  }
+
   applyPrefs();   // restore saved pair/TF/indicators before building UI
 
   initChart();
