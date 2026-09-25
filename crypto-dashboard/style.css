@@ -126,6 +126,8 @@ html, body {
   user-select: none;
   line-height: 1;
 }
+/* Many indicator buttons: slightly tighter so the whole toolbar fits */
+.ind-btn { padding: 4px 6px; }
 .pair-btn:hover, .tf-btn:hover, .ct-btn:hover, .ind-btn:hover {
   color: var(--text); background: var(--bg3);
 }

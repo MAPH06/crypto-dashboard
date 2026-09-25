@@ -4,7 +4,7 @@
 //  CONFIG
 // ═══════════════════════════════════════════════════════════
 
-const APP_VERSION   = 'v67';
+const APP_VERSION   = 'v68';
 const BINANCE_BASE  = 'https://api.binance.com/api/v3';
 const CHART_REFRESH = 120_000;
 const TREND_REFRESH = 5 * 60_000;
@@ -22,7 +22,6 @@ const TOP_BASES = [
   { id: 'ADA',    name: 'Cardano'             },
   { id: 'AEVO',   name: 'Aevo'                },
   { id: 'AGLD',   name: 'Adventure Gold'      },
-  { id: 'AKT',    name: 'Akash Network'       },
   { id: 'ALGO',   name: 'Algorand'            },
   { id: 'ALT',    name: 'AltLayer'            },
   { id: 'ANKR',   name: 'Ankr'                },
@@ -56,8 +55,6 @@ const TOP_BASES = [
   { id: 'CHZ',    name: 'Chiliz'              },
   { id: 'CKB',    name: 'Nervos Network'      },
   { id: 'COMP',   name: 'Compound'            },
-  { id: 'CORE',   name: 'Core DAO'            },
-  { id: 'CRO',    name: 'Cronos'              },
   { id: 'CRV',    name: 'Curve DAO'           },
   { id: 'CVC',    name: 'Civic'               },
   { id: 'CYBER',  name: 'CyberConnect'        },
@@ -66,7 +63,6 @@ const TOP_BASES = [
   { id: 'DOGE',   name: 'Dogecoin'            },
   { id: 'DOGS',   name: 'DOGS'                },
   { id: 'DOT',    name: 'Polkadot'            },
-  { id: 'DRIFT',  name: 'Drift Protocol'      },
   { id: 'DYDX',   name: 'dYdX'                },
   { id: 'EGLD',   name: 'MultiversX'          },
   { id: 'EIGEN',  name: 'EigenLayer'          },
@@ -79,7 +75,6 @@ const TOP_BASES = [
   { id: 'FET',    name: 'Fetch.ai / ASI'      },
   { id: 'FIL',    name: 'Filecoin'            },
   { id: 'FLOKI',  name: 'Floki'               },
-  { id: 'FLR',    name: 'Flare'               },
   { id: 'FLOW',   name: 'Flow'                },
   { id: 'FLUX',   name: 'Flux'                },
   { id: 'FTM',    name: 'Fantom'              },
@@ -105,7 +100,6 @@ const TOP_BASES = [
   { id: 'IOST',   name: 'IOST'                },
   { id: 'IOTA',   name: 'IOTA'                },
   { id: 'IOTX',   name: 'IoTeX'               },
-  { id: 'IP',     name: 'Story'               },
   { id: 'JASMY',  name: 'JasmyCoin'           },
   { id: 'JTO',    name: 'Jito'                },
   { id: 'JUP',    name: 'Jupiter'             },
@@ -130,7 +124,6 @@ const TOP_BASES = [
   { id: 'METIS',  name: 'Metis'               },
   { id: 'MINA',   name: 'Mina Protocol'       },
   { id: 'MKR',    name: 'Maker'               },
-  { id: 'MNT',    name: 'Mantle'              },
   { id: 'MOVE',   name: 'Movement'            },
   { id: 'MOVR',   name: 'Moonriver'           },
   { id: 'NEAR',   name: 'NEAR Protocol'       },
@@ -162,7 +155,6 @@ const TOP_BASES = [
   { id: 'POL',    name: 'Polygon'             },
   { id: 'POLYX',  name: 'Polymesh'            },
   { id: 'POLS',   name: 'Polkastarter'        },
-  { id: 'POPCAT', name: 'Popcat'              },
   { id: 'PORTAL', name: 'Portal'              },
   { id: 'PYTH',   name: 'Pyth Network'        },
   { id: 'QNT',    name: 'Quant'               },
@@ -180,7 +172,6 @@ const TOP_BASES = [
   { id: 'RUNE',   name: 'THORChain'           },
   { id: 'RVN',    name: 'Ravencoin'           },
   { id: 'SAND',   name: 'The Sandbox'         },
-  { id: 'SATS',   name: '1000SATS'            },
   { id: 'SCRT',   name: 'Secret Network'      },
   { id: 'SEI',    name: 'Sei'                 },
   { id: 'SFP',    name: 'SafePal'             },
@@ -211,7 +202,6 @@ const TOP_BASES = [
   { id: 'TWT',    name: 'Trust Wallet'        },
   { id: 'UMA',    name: 'UMA Protocol'        },
   { id: 'UNI',    name: 'Uniswap'             },
-  { id: 'UOS',    name: 'Ultra'               },
   { id: 'VET',    name: 'VeChain'             },
   { id: 'VIRTUAL',name: 'Virtuals Protocol'   },
   { id: 'VTHO',   name: 'VeThor Token'        },
@@ -230,9 +220,7 @@ const TOP_BASES = [
   { id: 'YGG',    name: 'Yield Guild'         },
   { id: 'ZEC',    name: 'Zcash'               },
   { id: 'ZEN',    name: 'Horizen'             },
-  { id: 'ZETA',   name: 'ZetaChain'           },
   { id: 'ZIL',    name: 'Zilliqa'             },
-  { id: 'ZKJ',    name: 'Polyhedra Network'   },
   { id: 'ZRO',    name: 'LayerZero'           },
   { id: 'ZRX',    name: '0x Protocol'         },
 ];
@@ -242,6 +230,45 @@ const QUOTES = [
   { id: 'USDC', cur: '$' },
   { id: 'EUR',  cur: '€' },
 ];
+
+// Binance lists USD pairs for only a handful of coins and not every coin has a
+// USDC pair. For USD/USDC fall back to the next stablecoin that exists
+// (USD → USDC → USDT, USDC → USDT); the header then shows the real pair.
+// EUR has no equivalent fallback: a missing EUR pair shows a clear message.
+const QUOTE_FALLBACKS = { USD: ['USD', 'USDC', 'USDT'], USDC: ['USDC', 'USDT'], EUR: ['EUR'] };
+const pairExistsCache = new Map();
+
+async function pairExists(symbol) {
+  if (!pairExistsCache.has(symbol)) {
+    let ok;
+    try {
+      const r = await fetch(`${BINANCE_BASE}/klines?symbol=${symbol}&interval=1d&limit=1`);
+      ok = r.ok && ((await r.json())?.length ?? 0) > 0;
+    } catch (err) {
+      // Binance answers an unknown symbol with a 400 that lacks CORS headers, so the
+      // browser reports a network error. If Binance itself is reachable, that error
+      // means "pair does not exist"; otherwise it's a real network problem.
+      const ping = await fetch(`${BINANCE_BASE}/ping`).catch(() => null);
+      if (!ping?.ok) throw err;
+      ok = false;
+    }
+    pairExistsCache.set(symbol, ok);
+  }
+  return pairExistsCache.get(symbol);
+}
+
+async function resolveSymbol(base, quote) {
+  try {
+    for (const q of QUOTE_FALLBACKS[quote] ?? [quote]) {
+      if (await pairExists(base + q)) {
+        return { label: `${base}/${q}`, symbol: base + q, cur: q === 'EUR' ? '€' : '$' };
+      }
+    }
+    return { ...buildSym(base, quote), missing: true };
+  } catch {
+    return buildSym(base, quote);                   // network hiccup: just try the pair itself
+  }
+}
 
 function buildSym(base, quote) {
   const q = QUOTES.find(x => x.id === quote) || QUOTES[0];
@@ -301,6 +328,8 @@ const OVERLAY_INDS = [
   { id: 'pi',       label: 'Pi Cycle',  color: '#ffa657', defaultOn: false },
   { id: 'growth',   label: 'Groeicurves', color: '#bc8cff', defaultOn: false },
   { id: 'halving',  label: 'Halving',   color: '#f85149', defaultOn: false },
+  { id: 'cyclema',  label: "Cycle MA's", color: '#bc8cff', defaultOn: false },
+  { id: 'cycle',    label: 'Cyclus',    color: '#26a641', defaultOn: false },
   { id: 'ichimoku', label: 'Ichimoku',  color: '#bc8cff', defaultOn: false },
   { id: 'swing',    label: 'Swing',     color: '#bc8cff', defaultOn: false },
   { id: 'sr',       label: 'S/R',       color: '#58a6ff', defaultOn: false },
@@ -559,6 +588,14 @@ function initChart() {
   ser.pi350 = mkLine(chart, '#d2a8ff', 2, false, true);
   // Far above price for most of the cycle: don't let it squeeze the candles
   ser.pi350.applyOptions({ autoscaleInfoProvider: () => null });
+
+  // Cycle MA's — weekly/monthly moving averages, shown on every timeframe
+  CYCLE_MAS.forEach(m => {
+    ser[m.key] = chart.addLineSeries({
+      color: m.color, lineWidth: 2, title: m.title, visible: false,
+      priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false,
+    });
+  });
 
   // Invisible close-price series that always stays visible, used as host for the
   // growth-curve and halving overlays (a hidden series would not draw them).
@@ -1278,6 +1315,63 @@ async function updatePiCycle(candles, tf, sym) {
   applySwingAndSR();
 }
 
+// ── Cycle MA's: 12/21-month and 200/300/400-week SMAs ────────────────────────
+// Computed on real weekly/monthly candles (full history of the selected coin,
+// incl. Kraken history) and projected onto whatever timeframe is shown — like
+// TradingView's MA "Timeframe" setting. Didi's view: 1M chart with log scale.
+const CYCLE_MAS = [
+  { key: 'cma12m',  src: '1M', len: 12,  color: '#fd7e14', title: '12M'  },
+  { key: 'cma21m',  src: '1M', len: 21,  color: '#58a6ff', title: '21M'  },
+  { key: 'cma200w', src: '1w', len: 200, color: '#f85149', title: '200W' },
+  { key: 'cma300w', src: '1w', len: 300, color: '#bc8cff', title: '300W' },
+  { key: 'cma400w', src: '1w', len: 400, color: '#3fb950', title: '400W' },
+];
+const cycleSrcCache = new Map();
+
+async function fetchCycleSource(sym, interval) {
+  const key = sym.symbol + interval;
+  const hit = cycleSrcCache.get(key);
+  if (hit && Date.now() - hit.at < 3600e3) return hit.data;
+  const data = await extendWithCCHistory(parseKlines(await fetchKlines(sym.symbol, interval, 1000)), { interval });
+  cycleSrcCache.set(key, { at: Date.now(), data });
+  return data;
+}
+
+// Each candle takes the value of the last source bar that starts before the
+// candle ends (so a daily candle shows the MA of the week/month it falls in).
+function projectOnCandles(src, vals, candles) {
+  const out = [];
+  let j = -1;
+  for (let i = 0; i < candles.length; i++) {
+    const end = i + 1 < candles.length ? candles[i + 1].time : Infinity;
+    while (j + 1 < src.length && src[j + 1].time < end) j++;
+    if (j < 0 || vals[j] == null) continue;
+    out.push({ time: candles[i].time, value: vals[j] });
+  }
+  return out;
+}
+
+async function updateCycleMAs(candles, sym) {
+  if (!candles.length) return;
+  let weekly, monthly;
+  try {
+    [weekly, monthly] = await Promise.all([fetchCycleSource(sym, '1w'), fetchCycleSource(sym, '1M')]);
+  } catch { weekly = monthly = []; }
+  if (candles !== currentCandles) return;           // user switched meanwhile
+  CYCLE_MAS.forEach(m => {
+    const src = m.src === '1w' ? weekly : monthly;
+    const closes = src.map(c => c.close);
+    const vals = new Array(src.length).fill(null);
+    let sum = 0;
+    for (let i = 0; i < src.length; i++) {
+      sum += closes[i];
+      if (i >= m.len) sum -= closes[i - m.len];
+      if (i >= m.len - 1) vals[i] = sum / m.len;
+    }
+    ser[m.key].setData(projectOnCandles(src, vals, candles));
+  });
+}
+
 // ── Growth curves + halving lines (drawn as one overlay) ─────────────────────
 // Growth curves: power law log10(price) = a + b·log10(days since genesis block),
 // fitted on Bitstamp BTC/USD daily data through the cycle tops (2013, 2017, 2021,
@@ -1296,7 +1390,34 @@ const HALVING_LINES = [
   { t: Date.UTC(2020,  4, 11) / 1000, label: 'Halving 2020' },
   { t: Date.UTC(2024,  3, 20) / 1000, label: 'Halving 2024' },
   { t: Date.UTC(2028,  3, 15) / 1000, label: 'Halving ~apr 2028 (verwacht)', future: true },
+  { t: Date.UTC(2032,  3, 10) / 1000, label: 'Halving ~apr 2032 (verwacht)', future: true },
 ];
+
+// Cycle timing, measured on Bitstamp BTC/USD: days from halving to cycle top and
+// to cycle bottom. 2012 is left out (its top came after only ~1 year).
+//   2016-07-09 → top 2017-12-17 (526 d) → bottom 2018-12-15 (889 d)
+//   2020-05-11 → top 2021-11-10 (548 d) → bottom 2022-11-21 (924 d)
+//   2024-04-20 → top 2025-10-06 (534 d) → bottom: not yet known
+const CYCLE_TOP_DAYS    = [526, 548, 534];
+const CYCLE_BOTTOM_DAYS = [889, 924];
+const CYCLE_FROM        = Date.UTC(2016, 0, 1) / 1000;   // zones from the 2016 halving on
+
+// With Cyclus on a weekly/monthly chart, open up empty space on the right so the
+// projected top/bottom zones are visible: until 2031 on 1W, until mid-2035 on 1M.
+function extendViewForCycle() {
+  const iv = currentTF.interval, c = currentCandles, n = c.length;
+  if (!indVisible.cycle || !['1w', '1M'].includes(iv) || n < 2) return;
+  const until = (iv === '1M' ? Date.UTC(2035, 5, 1) : Date.UTC(2031, 2, 1)) / 1000 + TZ_OFFSET_SEC;
+  const extra = Math.ceil((until - c[n - 1].time) / (c[n - 1].time - c[n - 2].time));
+  const r = chart.timeScale().getVisibleLogicalRange();
+  if (!r || extra <= 0) return;
+  // Apply to all panes at once: the range-sync handlers would otherwise push the
+  // old range of the oscillator/MACD pane back onto the main chart.
+  const range = { from: Math.max(r.from, 0), to: n - 1 + extra };
+  syncing = true;
+  [chart, oscChart, macdChart].forEach(c => c?.timeScale().setVisibleLogicalRange(range));
+  syncing = false;
+}
 
 // Time ↔ logical bar index, interpolated between candles and extrapolated past
 // either end, so lines can be placed on dates without a candle (or in the future).
@@ -1336,7 +1457,8 @@ class CycleOverlayPrimitive {
     if (!this._chart || currentCandles.length < 2) return;
     const showGrowth  = indVisible.growth && currentBase === 'BTC' && currentQuote !== 'EUR';
     const showHalving = indVisible.halving;
-    if (!showGrowth && !showHalving) return;
+    const showCycle   = indVisible.cycle;
+    if (!showGrowth && !showHalving && !showCycle) return;
     const ts = this._chart.timeScale(), s = this._series;
 
     target.useBitmapCoordinateSpace(({ context: ctx, bitmapSize, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
@@ -1374,6 +1496,32 @@ class CycleOverlayPrimitive {
             ctx.fillText(g.label, (lx - 70) * hr, (ly - 4) * vr);
           }
         });
+      }
+
+      if (showCycle) {
+        const l0 = ts.coordinateToLogical(0), l1 = ts.coordinateToLogical(W);
+        if (l0 != null && l1 != null && l1 !== l0) {
+          const xOf = t => { const l = timeToLogical(t + TZ_OFFSET_SEC); return l == null ? null : (l - l0) / (l1 - l0) * W; };
+          const fmt = t => new Date(t * 1000).toLocaleDateString('nl-NL', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+          const zone = (h, days, fill, edge, name, row) => {
+            const a = h.t + Math.min(...days) * 86400, b = h.t + Math.max(...days) * 86400;
+            let xa = xOf(a), xb = xOf(b);
+            if (xa == null || xb == null || xb < 0 || xa > W) return;
+            if (xb - xa < 3) { const m = (xa + xb) / 2; xa = m - 1.5; xb = m + 1.5; }
+            ctx.fillStyle = fill;
+            ctx.fillRect(xa * hr, 0, (xb - xa) * hr, H * vr);
+            ctx.fillStyle = edge; ctx.textAlign = 'left';
+            ctx.font = `bold ${10 * vr}px monospace`;
+            const label = `${name}${h.future || a * 1000 > Date.now() ? ' (verwacht)' : ''}`;
+            ctx.fillText(label, (xa + 3) * hr, (30 + row * 26) * vr);
+            ctx.font = `${10 * vr}px monospace`;
+            ctx.fillText(fmt(a) === fmt(b) ? fmt(a) : `${fmt(a)} – ${fmt(b)}`, (xa + 3) * hr, (42 + row * 26) * vr);
+          };
+          HALVING_LINES.filter(h => h.t >= CYCLE_FROM).forEach(h => {
+            zone(h, CYCLE_TOP_DAYS,    'rgba(38,166,65,0.13)', 'rgba(87,171,90,0.95)', 'Top-zone',   0);
+            zone(h, CYCLE_BOTTOM_DAYS, 'rgba(248,81,73,0.13)', 'rgba(248,81,73,0.95)', 'Bodem-zone', 1);
+          });
+        }
       }
 
       if (showHalving) {
@@ -2276,6 +2424,7 @@ async function loadChart(tf, sym, resetView = true) {
     if (indVisible.gc) applyGCCandleColors();
     cycleOverlay.requestRedraw();
     if (indVisible.pi) updatePiCycle(candles, tf, sym);
+    if (indVisible.cyclema) updateCycleMAs(candles, sym);
     currentSwingPts = calcSwingPoints(candles);
 
     applyChartType();
@@ -2304,6 +2453,7 @@ async function loadChart(tf, sym, resetView = true) {
     // every coin/timeframe switch so the view jumps to the current price level.
     if (resetView) {
       [chart, oscChart, macdChart].forEach(c => c?.priceScale('right').applyOptions({ autoScale: true }));
+      extendViewForCycle();
     }
     syncPriceScaleWidths(resetView);
 
@@ -2377,6 +2527,7 @@ function applyAllVisibility() {
   [ser.gc_upper, ser.gc_mid, ser.gc_lower].forEach(s => s.applyOptions({ visible: indVisible.gc }));
   [ser.st_up, ser.st_dn].forEach(s => s.applyOptions({ visible: indVisible.st }));
   [ser.pi111, ser.pi350].forEach(s => s.applyOptions({ visible: indVisible.pi }));
+  CYCLE_MAS.forEach(m => ser[m.key].applyOptions({ visible: indVisible.cyclema }));
 
   const ps = indVisible.psar;
   ser.psar_bull.applyOptions({ visible: ps });
@@ -2444,8 +2595,14 @@ function toggleIndicator(id, visible) {
     else applySwingAndSR();
     return;
   }
-  if (id === 'growth' || id === 'halving') {
+  if (id === 'cyclema') {
+    CYCLE_MAS.forEach(m => ser[m.key].applyOptions({ visible }));
+    if (visible) updateCycleMAs(currentCandles, currentSymbol);
+    return;
+  }
+  if (id === 'growth' || id === 'halving' || id === 'cycle') {
     cycleOverlay.requestRedraw();
+    if (id === 'cycle' && visible) extendViewForCycle();
     return;
   }
   if (id === 'bambam') {
@@ -2608,30 +2765,39 @@ function updateTimestamp() {
 }
 
 // ─── Historical data ──────────────────────────────────────────────────────────
-// 1W/1M  → Kraken weekly  (interval=10080, no key, CORS OK, back to 2013)
-// 1D BTC → Binance BTCUSDT daily (same API/SW as main chart, back to Aug 2017)
-//           + Kraken weekly for the 2013–2017 pre-BTCUSDT gap (proven working)
-// 1D alt → CryptoCompare v1 fallback
-const ccDailyCache = new Map();
-let krakenWeeklyCache = null;
-let btcDailyCache     = null;
+// Always the history of the SELECTED coin in the selected currency (USD/USDC → USD):
+// 1W/1M   → Kraken weekly per coin (interval=10080, no key, CORS OK; BTC from 2013,
+//           ETH from 2015, ...)
+// 1D BTC  → Binance BTCUSDT daily (back to Aug 2017) + Kraken BTC/USD weekly for
+//           2013–2017 (USD/USDC only)
+// 1D rest → Bitstamp daily for the coin, where Bitstamp lists it (no key, CORS OK)
+// A coin that neither source knows simply shows its Binance history.
+const krakenWeeklyCache   = new Map();
+const bitstampHistCache   = new Map();
+let btcDailyCache         = null;
 
-async function fetchKrakenWeekly() {
-  if (krakenWeeklyCache) return krakenWeeklyCache;
+const histFiat = () => currentQuote === 'EUR' ? 'EUR' : 'USD';
+
+async function fetchKrakenWeekly(base, fiat) {
+  const key = base + fiat;
+  if (krakenWeeklyCache.has(key)) return krakenWeeklyCache.get(key);
+  let out = [];
   try {
-    const r = await fetch('https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=10080');
+    const asset = base === 'BTC' ? 'XBT' : base;     // Kraken calls bitcoin XBT
+    const r = await fetch(`https://api.kraken.com/0/public/OHLC?pair=${asset}${fiat}&interval=10080`);
     const d = await r.json();
-    if (d.error?.length) return [];
+    // Result key varies per pair (XXBTZUSD, XETHZEUR, SOLUSD, ...): take the one that isn't 'last'
+    const pairKey = d.error?.length ? null : Object.keys(d.result ?? {}).find(k => k !== 'last');
     // Each entry: [time, open, high, low, close, vwap, volume, count]
-    const raw = d.result?.XXBTZUSD ?? [];
-    krakenWeeklyCache = raw
+    out = (pairKey ? d.result[pairKey] : [])
       .map(([t, o, h, l, c, , v]) => ({
         time: Number(t), open: Number(o), high: Number(h),
         low: Number(l),  close: Number(c), volume: Number(v),
       }))
       .filter(c => c.close > 0);
-    return krakenWeeklyCache;
-  } catch { return []; }
+  } catch { out = []; }
+  krakenWeeklyCache.set(key, out);
+  return out;
 }
 
 // Binance BTCUSDT daily — forward pagination from Aug 2017 to now.
@@ -2658,38 +2824,31 @@ async function fetchBTCUSDTDaily() {
   return all;
 }
 
-async function fetchCCHistoricalDaily(base, endUtcTs) {
-  if (ccDailyCache.has(base)) {
-    return ccDailyCache.get(base).filter(c => c.time <= endUtcTs);
+// Bitstamp daily candles for any coin it lists, oldest first, TZ-shifted.
+// Bitstamp returns nothing for a window that lies entirely before the listing,
+// so empty pages step forward instead of stopping.
+async function fetchBitstampDaily(base, fiat, endTs) {
+  const key = base + fiat;
+  if (!bitstampHistCache.has(key)) {
+    const out = [];
+    let start = 1313000000;                          // Aug 2011
+    const now = Date.now() / 1000;
+    for (let page = 0; page < 12 && start < now; page++) {
+      try {
+        const r = await fetch(`https://www.bitstamp.net/api/v2/ohlc/${base.toLowerCase()}${fiat.toLowerCase()}/?step=86400&limit=1000&start=${start}`);
+        if (!r.ok) break;                            // pair not listed on Bitstamp
+        const ohlc = (await r.json())?.data?.ohlc ?? [];
+        if (!ohlc.length) { start += 1000 * 86400; continue; }
+        ohlc.forEach(k => out.push({
+          time: Number(k.timestamp) + TZ_OFFSET_SEC, open: Number(k.open), high: Number(k.high),
+          low: Number(k.low), close: Number(k.close), volume: Number(k.volume),
+        }));
+        start = Number(ohlc.at(-1).timestamp) + 86400;
+      } catch { break; }
+    }
+    bitstampHistCache.set(key, out.filter(c => c.close > 0));
   }
-  const all  = [];
-  const seen = new Set();
-  let toTs   = endUtcTs;
-  for (let page = 0; page < 3; page++) {          // max 3 × 2000 = 6000 days
-    try {
-      // Use v1 endpoint — works without an API key; v2 requires authorization.
-      const r = await fetch(
-        `https://min-api.cryptocompare.com/data/histoday` +
-        `?fsym=${encodeURIComponent(base)}&tsym=USD&limit=2000&toTs=${toTs}`
-      );
-      const d = await r.json();
-      if (d.Response !== 'Success') break;
-      // v1: d.Data is a direct array (v2 would be d.Data.Data)
-      const raw = Array.isArray(d.Data) ? d.Data : (d.Data?.Data ?? []);
-      const items = raw.filter(c => c.close > 0 && !seen.has(c.time));
-      if (!items.length) break;
-      for (const c of items) {
-        seen.add(c.time);
-        all.push({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volumefrom });
-      }
-      const oldest = items[0].time;               // v1 returns data oldest-first
-      if (oldest <= 1325376000) break;            // reached 2012-01-01, enough
-      toTs = oldest - 86400;
-    } catch { break; }
-  }
-  all.sort((a, b) => a.time - b.time);
-  ccDailyCache.set(base, all);
-  return all.filter(c => c.time <= endUtcTs);
+  return bitstampHistCache.get(key).filter(c => c.time < endTs);
 }
 
 // Aggregate UTC daily candles → weekly (Monday UTC) with TZ shift applied
@@ -2734,14 +2893,14 @@ function aggregateDailyToMonthly(daily) {
     .map(m => ({ ...m, time: m.time + TZ_OFFSET_SEC }));
 }
 
-// Prepend historical candles (Kraken for 1W/1M, CryptoCompare for 1D).
+// Prepend historical candles (Kraken for 1W/1M; BTCUSDT/Kraken or Bitstamp for 1D).
 // For other intervals returns the Binance candles unchanged.
 async function extendWithCCHistory(binanceCandles, tf) {
   if (!['1d', '1w', '1M'].includes(tf.interval)) return binanceCandles;
 
   // ── 1W and 1M: use Kraken public API (no key needed, CORS OK, ~14 years) ──
   if (tf.interval === '1w' || tf.interval === '1M') {
-    const krakenRaw = await fetchKrakenWeekly(); // UTC timestamps, no TZ shift
+    const krakenRaw = await fetchKrakenWeekly(currentBase, histFiat()); // UTC timestamps, no TZ shift
     if (!krakenRaw.length) return binanceCandles;
 
     let historical;
@@ -2753,9 +2912,10 @@ async function extendWithCCHistory(binanceCandles, tf) {
       historical = krakenRaw.map(c => ({ ...c, time: c.time + TZ_OFFSET_SEC }));
     }
 
-    const cutoff = binanceCandles.length ? binanceCandles[0].time : Infinity;
+    const bin = dropListingCandle(binanceCandles, historical);
+    const cutoff = bin.length ? bin[0].time : Infinity;
     const prepend = historical.filter(c => c.time < cutoff);
-    return binanceCandles.length ? [...prepend, ...binanceCandles] : historical;
+    return bin.length ? [...prepend, ...bin] : historical;
   }
 
   // ── 1D BTC: BTCUSDT daily (Aug 2017 → now) + Kraken weekly (2013–2017) ──
@@ -2763,9 +2923,9 @@ async function extendWithCCHistory(binanceCandles, tf) {
   // For BTC/USD we use BTCUSDT as the FULL source (USDT ≈ USD, avoids the tiny-volume
   // transition when appending the newly-listed BTCUSD pair).
   // For BTC/USDC and BTC/EUR we prepend BTCUSDT history before the Binance pair data.
-  if (currentBase === 'BTC') {
+  if (currentBase === 'BTC' && currentQuote !== 'EUR') {
     const daily      = await fetchBTCUSDTDaily();       // TZ-shifted, Aug 2017 → now
-    const krakenRaw  = await fetchKrakenWeekly();
+    const krakenRaw  = await fetchKrakenWeekly('BTC', 'USD');
     const dailyStart = daily.length ? daily[0].time : Infinity;
     const weekly     = krakenRaw
       .map(c => ({ ...c, time: c.time + TZ_OFFSET_SEC }))
@@ -2777,23 +2937,29 @@ async function extendWithCCHistory(binanceCandles, tf) {
       const all = [...weekly, ...daily];
       if (all.length) return all;
     } else {
-      // USDC / EUR: prepend Kraken+BTCUSDT history, keep the Binance pair for current data
+      // USDC: prepend Kraken+BTCUSDT history, keep the Binance pair for current data
       const cutoff  = binanceCandles.length ? binanceCandles[0].time : Infinity;
       const prepend = [...weekly, ...daily].filter(c => c.time < cutoff);
       if (prepend.length) return binanceCandles.length ? [...prepend, ...binanceCandles] : prepend;
     }
   }
 
-  // Fallback for other coins: CryptoCompare v1
-  const endUtcTs = binanceCandles.length
-    ? binanceCandles[0].time - TZ_OFFSET_SEC - 86400
-    : Math.floor(Date.now() / 1000);
-  const ccDaily = await fetchCCHistoricalDaily(currentBase, endUtcTs);
-  if (!ccDaily.length) return binanceCandles;
-  const ccCandles = ccDaily.map(c => ({ ...c, time: c.time + TZ_OFFSET_SEC }));
-  if (!binanceCandles.length) return ccCandles;
-  const prepend = ccCandles.filter(c => c.time < binanceCandles[0].time);
-  return [...prepend, ...binanceCandles];
+  // Other coins (and BTC/EUR): Bitstamp daily of the selected coin and currency
+  const hist = await fetchBitstampDaily(currentBase, histFiat(), Infinity);
+  const bin = dropListingCandle(binanceCandles, hist);
+  const cutoff = bin.length ? bin[0].time : Infinity;
+  const prepend = hist.filter(c => c.time < cutoff);
+  if (!prepend.length) return binanceCandles;
+  return [...prepend, ...bin];
+}
+
+// Binance's very first candle of a newly listed pair often has absurd opening
+// trades (XLM/USDC opened at 1.00 while trading at 0.09, SUI/EUR spiked to 7.75).
+// When another exchange has history covering that period, drop it and let the
+// history fill the slot instead.
+function dropListingCandle(binanceCandles, history) {
+  if (binanceCandles.length < 2 || !history.length) return binanceCandles;
+  return history[0].time <= binanceCandles[0].time ? binanceCandles.slice(1) : binanceCandles;
 }
 
 // ─── Fear & Greed (current) ──────────────────────────────────────────────────
@@ -3134,8 +3300,14 @@ function updateHeader(t, sym) {
 
 async function switchPair() {
   savePrefs({ base: currentBase, quote: currentQuote });
-  connectWS(currentSymbol);
   resetTimers();
+  currentSymbol = await resolveSymbol(currentBase, currentQuote);
+  if (currentSymbol.missing) {
+    showError(`${currentBase}/${currentQuote} wordt niet aangeboden op Binance — kies een andere valuta.`);
+    return;
+  }
+  hideError();
+  connectWS(currentSymbol);
   updateTrendPanel(currentSymbol.symbol);
   await loadChart(currentTF, currentSymbol);
   scheduleTimers();
@@ -3404,6 +3576,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadChart(currentTF, currentSymbol);
   });
 
+  currentSymbol = await resolveSymbol(currentBase, currentQuote);
   await Promise.all([
     loadChart(currentTF, currentSymbol),
     updateTrendPanel(currentSymbol.symbol),
