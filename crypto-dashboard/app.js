@@ -4,7 +4,7 @@
 //  CONFIG
 // ═══════════════════════════════════════════════════════════
 
-const APP_VERSION   = 'v66';
+const APP_VERSION   = 'v67';
 const BINANCE_BASE  = 'https://api.binance.com/api/v3';
 const CHART_REFRESH = 120_000;
 const TREND_REFRESH = 5 * 60_000;
@@ -3162,39 +3162,54 @@ function buildPairSelector() {
   });
   baseGrp.appendChild(sel);
 
-  // ── Quote currency buttons ────────────────────────────
+  // ── Quote currency dropdown (saves toolbar width) ─────
   const quoteGrp = document.getElementById('quote-buttons');
+  const qSel = document.createElement('select');
+  qSel.className = 'pair-select';
+  qSel.title = 'Selecteer quote-valuta';
   QUOTES.forEach(q => {
-    const btn = mkBtn('pair-btn' + (q.id === currentQuote ? ' active' : ''), q.id);
-    btn.addEventListener('click', async () => {
-      if (q.id === currentQuote) return;
-      currentQuote  = q.id;
-      currentSymbol = buildSym(currentBase, currentQuote);
-      quoteGrp.querySelectorAll('.pair-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      await switchPair();
-    });
-    quoteGrp.appendChild(btn);
+    const opt = document.createElement('option');
+    opt.value = q.id;
+    opt.textContent = q.id;
+    if (q.id === currentQuote) opt.selected = true;
+    qSel.appendChild(opt);
   });
+  qSel.addEventListener('change', async () => {
+    currentQuote  = qSel.value;
+    currentSymbol = buildSym(currentBase, currentQuote);
+    await switchPair();
+  });
+  quoteGrp.appendChild(qSel);
 }
+
+const TF_NAMES = {
+  '1M': 'maand', '1w': 'week', '5d': '5 dagen', '3d': '3 dagen', '1d': 'dag',
+  '4h': '4 uur', '1h': '1 uur', '15m': '15 min', '5m': '5 min', '3m': '3 min', '1m': '1 min',
+};
 
 function buildTFButtons() {
   const grp = document.getElementById('timeframe-buttons');
-  TIMEFRAMES.forEach(tf => {
-    const btn = mkBtn('tf-btn' + (tf === currentTF ? ' active' : ''), tf.label);
-    btn.addEventListener('click', async () => {
-      if (currentTF === tf) return;
-      currentTF = tf;
-      grp.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      savePrefs({ tf: tf.interval });
-      if (tf.preset) applyIndicatorPreset(tf.preset);
-      resetTimers();
-      await loadChart(tf, currentSymbol);
-      scheduleTimers();
-    });
-    grp.appendChild(btn);
+  const sel = document.createElement('select');
+  sel.className = 'pair-select tf-select';
+  sel.title = 'Selecteer timeframe';
+  TIMEFRAMES.forEach((tf, i) => {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = `${tf.label} · ${TF_NAMES[tf.interval] ?? tf.label}`;
+    if (tf === currentTF) opt.selected = true;
+    sel.appendChild(opt);
   });
+  sel.addEventListener('change', async () => {
+    const tf = TIMEFRAMES[Number(sel.value)];
+    if (currentTF === tf) return;
+    currentTF = tf;
+    savePrefs({ tf: tf.interval });
+    if (tf.preset) applyIndicatorPreset(tf.preset);
+    resetTimers();
+    await loadChart(tf, currentSymbol);
+    scheduleTimers();
+  });
+  grp.appendChild(sel);
 }
 
 function buildLogButton() {

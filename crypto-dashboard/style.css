@@ -149,6 +149,7 @@ html, body {
   border-color: rgba(88,166,255,0.40);
   color: var(--blue);
 }
+.tf-select { min-width: 96px; }
 .pair-select option {
   background: var(--bg2);
   color: var(--text);
