@@ -4,7 +4,7 @@
 //  CONFIG
 // ═══════════════════════════════════════════════════════════
 
-const APP_VERSION   = 'v64';
+const APP_VERSION   = 'v66';
 const BINANCE_BASE  = 'https://api.binance.com/api/v3';
 const CHART_REFRESH = 120_000;
 const TREND_REFRESH = 5 * 60_000;
@@ -297,6 +297,10 @@ const OVERLAY_INDS = [
   { id: 'psar',     label: 'PSAR',      color: '#f0b429', defaultOn: false },
   { id: 'kc',       label: 'KC',        color: '#7dd3fc', defaultOn: false },
   { id: 'gc',       label: 'GC',        color: '#3fb950', defaultOn: false },
+  { id: 'st',       label: 'Supertrend', color: '#26a641', defaultOn: false },
+  { id: 'pi',       label: 'Pi Cycle',  color: '#ffa657', defaultOn: false },
+  { id: 'growth',   label: 'Groeicurves', color: '#bc8cff', defaultOn: false },
+  { id: 'halving',  label: 'Halving',   color: '#f85149', defaultOn: false },
   { id: 'ichimoku', label: 'Ichimoku',  color: '#bc8cff', defaultOn: false },
   { id: 'swing',    label: 'Swing',     color: '#bc8cff', defaultOn: false },
   { id: 'sr',       label: 'S/R',       color: '#58a6ff', defaultOn: false },
@@ -459,6 +463,7 @@ let ser          = {};   // all named series handles
 // Swing / S&R / Liquidity state
 let currentCandles  = [];
 let currentSwingPts = { highs: [], lows: [] };
+let gcBarColors     = new Map();   // candle time → DonovanWall bar colour (used while GC is on)
 let srPriceLines    = [];
 let liqSeries       = [];
 let liqPriceLines   = [];
@@ -538,6 +543,31 @@ function initChart() {
   ser.gc_upper  = mkLine(chart, '#3fb950', 1, false, true);
   ser.gc_mid    = mkLine(chart, '#3fb950', 2, false, true);
   ser.gc_lower  = mkLine(chart, '#3fb950', 1, false, true);
+  gcFill = new GCFillPrimitive();
+  ser.gc_mid.attachPrimitive(gcFill);
+
+  // Supertrend — separate up/down step lines so a flip leaves a gap, not a jump
+  const mkStep = color => chart.addLineSeries({
+    color, lineWidth: 2, lineType: LightweightCharts.LineType.WithSteps,
+    priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, visible: false,
+  });
+  ser.st_up = mkStep('#26a641');
+  ser.st_dn = mkStep('#f85149');
+
+  // Pi Cycle Top — 111-day SMA and 2× 350-day SMA
+  ser.pi111 = mkLine(chart, '#ffa657', 2, false, true);
+  ser.pi350 = mkLine(chart, '#d2a8ff', 2, false, true);
+  // Far above price for most of the cycle: don't let it squeeze the candles
+  ser.pi350.applyOptions({ autoscaleInfoProvider: () => null });
+
+  // Invisible close-price series that always stays visible, used as host for the
+  // growth-curve and halving overlays (a hidden series would not draw them).
+  ser.overlayHost = chart.addLineSeries({
+    color: 'rgba(0,0,0,0)', lineWidth: 1,
+    priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+  });
+  cycleOverlay = new CycleOverlayPrimitive();
+  ser.overlayHost.attachPrimitive(cycleOverlay);
 
   // PSAR — two dot-only series (bull = green dots below price, bear = red dots above)
   const mkDots = (color) => chart.addLineSeries({
@@ -1036,19 +1066,346 @@ function calcGC(candles, period = 144, poles = 4, mult = 1.414) {
     : Math.max(c.high - c.low, Math.abs(c.high - candles[i - 1].close), Math.abs(c.low - candles[i - 1].close)));
   const filt = filter(src), ftr = filter(tr);
 
-  const upper = [], mid = [], lower = [];
+  const upper = [], mid = [], lower = [], up = [];
+  const bars  = new Map();
   // Skip the warm-up period while the filter settles
   const start = Math.min(period, candles.length - 1);
   for (let i = Math.max(start, 1); i < candles.length; i++) {
-    const t = candles[i].time;
-    const up = filt[i] >= filt[i - 1];
-    const col  = up ? '#3fb950' : '#f85149';
-    const bcol = up ? 'rgba(63,185,80,0.6)' : 'rgba(248,81,73,0.6)';
-    upper.push({ time: t, value: filt[i] + mult * ftr[i], color: bcol });
-    mid.push(  { time: t, value: filt[i],                 color: col  });
-    lower.push({ time: t, value: filt[i] - mult * ftr[i], color: bcol });
+    const t     = candles[i].time;
+    const rising = filt[i] >= filt[i - 1];
+    const hband = filt[i] + mult * ftr[i];
+    const lband = filt[i] - mult * ftr[i];
+    const col   = rising ? GC_UP : GC_DN;
+    const bcol  = rising ? 'rgba(10,255,104,0.6)' : 'rgba(255,10,90,0.6)';
+    upper.push({ time: t, value: hband,   color: bcol });
+    mid.push(  { time: t, value: filt[i], color: col  });
+    lower.push({ time: t, value: lband,   color: bcol });
+    up.push(rising);
+
+    // DonovanWall bar colours: bright = moving with the channel, dark = against it
+    const x = src[i], xp = src[i - 1], f = filt[i];
+    bars.set(t,
+        x >  xp && x >  f && x < hband ? '#0aff68'
+      : x >  xp && x >= hband          ? '#0aff1b'
+      : x <= xp && x >  f              ? '#00752d'
+      : x <  xp && x <  f && x > lband ? '#ff0a5a'
+      : x <  xp && x <= lband          ? '#ff0a11'
+      : x >= xp && x <  f              ? '#990032'
+      :                                  '#cccccc');
   }
-  return { upper, mid, lower };
+  return { upper, mid, lower, up, bars };
+}
+
+// Gaussian Channel fill between the bands (green while the filter rises, red while
+// it falls), drawn as a series primitive underneath the candles so it redraws with
+// every scroll, zoom and price-scale change.
+const GC_UP = '#0aff68', GC_DN = '#ff0a5a';
+let gcFill = null;
+
+class GCFillPrimitive {
+  constructor() { this._data = null; this._pts = []; }
+  attached({ chart, series, requestUpdate }) {
+    this._chart = chart; this._series = series; this._requestUpdate = requestUpdate;
+  }
+  detached() {}
+  setData(d) { this._data = d; this._requestUpdate?.(); }
+  updateAllViews() {
+    this._pts = [];
+    const d = this._data;
+    if (!d || !indVisible.gc || !this._chart) return;
+    const ts = this._chart.timeScale();
+    for (let i = 0; i < d.mid.length; i++) {
+      const x  = ts.timeToCoordinate(d.mid[i].time);
+      const yU = this._series.priceToCoordinate(d.upper[i].value);
+      const yL = this._series.priceToCoordinate(d.lower[i].value);
+      if (x == null || yU == null || yL == null) continue;
+      this._pts.push({ x, yU, yL, up: d.up[i] });
+    }
+  }
+  paneViews() {
+    const pts = this._pts;
+    return [{
+      zOrder: () => 'bottom',
+      renderer: () => ({
+        draw: target => target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
+          // One polygon per run of equal direction, so there are no seams between bars
+          let i = 0;
+          while (i < pts.length - 1) {
+            const up = pts[i + 1].up;
+            let j = i + 1;
+            while (j < pts.length - 1 && pts[j + 1].up === up) j++;
+            ctx.beginPath();
+            for (let k = i; k <= j; k++) ctx.lineTo(pts[k].x * hr, pts[k].yU * vr);
+            for (let k = j; k >= i; k--) ctx.lineTo(pts[k].x * hr, pts[k].yL * vr);
+            ctx.closePath();
+            ctx.fillStyle = up ? 'rgba(10,255,104,0.16)' : 'rgba(255,10,90,0.16)';
+            ctx.fill();
+            i = j;
+          }
+        }),
+      }),
+    }];
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CYCLE INDICATORS — Supertrend, Pi Cycle Top, growth curves, halvings
+// ═══════════════════════════════════════════════════════════
+
+let stSignals    = [];
+let piSignals    = [];
+let cycleOverlay = null;
+
+// Supertrend (TradingView default: ATR 10 with RMA smoothing, multiplier 3, src hl2).
+// Returns step lines for up/down trend and Buy/Sell markers at every flip.
+function calcSupertrend(candles, period = 10, mult = 3) {
+  const up = [], dn = [], signals = [];
+  if (candles.length <= period) return { up, dn, signals };
+  let atr = 0, upB = 0, dnB = 0, trend = 1;
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i], p = candles[i - 1];
+    const tr = i === 0 ? c.high - c.low
+      : Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close));
+    atr = i < period ? atr + tr / period : (atr * (period - 1) + tr) / period;
+    if (i < period - 1) continue;
+    const hl2 = (c.high + c.low) / 2;
+    let u = hl2 - mult * atr, d = hl2 + mult * atr;
+    if (i >= period) {
+      if (p.close > upB) u = Math.max(u, upB);
+      if (p.close < dnB) d = Math.min(d, dnB);
+      const prevTrend = trend;
+      if (trend === -1 && c.close > dnB) trend = 1;
+      else if (trend === 1 && c.close < upB) trend = -1;
+      if (trend !== prevTrend) signals.push(trend === 1
+        ? { time: c.time, position: 'belowBar', color: '#26a641', shape: 'arrowUp',   text: 'Buy',  size: 1 }
+        : { time: c.time, position: 'aboveBar', color: '#f85149', shape: 'arrowDown', text: 'Sell', size: 1 });
+    }
+    upB = u; dnB = d;
+    // Both bands are always plotted, the inactive one transparent: whitespace does
+    // not break a line in lightweight-charts 4, so gaps would be bridged. A band
+    // below zero (very volatile early history) is skipped: it breaks the log scale.
+    up.push(u > 0 ? { time: c.time, value: u, color: trend === 1  ? '#26a641' : 'rgba(0,0,0,0)' } : { time: c.time });
+    dn.push(d > 0 ? { time: c.time, value: d, color: trend === -1 ? '#f85149' : 'rgba(0,0,0,0)' } : { time: c.time });
+  }
+  return { up, dn, signals };
+}
+
+// ── Daily history for the Pi Cycle (needs 350+ daily closes) ─────────────────
+// BTC in USD/USDC: Bitstamp daily back to Aug 2011 (CORS OK, no key), so the
+// 2013/2017/2021 signals are visible. Other pairs: Binance daily (last 1000 days).
+let bitstampDailyCache = null;
+const binanceDailyCache = new Map();
+
+async function fetchBitstampDailyBTC() {
+  if (bitstampDailyCache && Date.now() - bitstampDailyCache.at < 3600e3) return bitstampDailyCache.data;
+  const out = [];
+  let start = 1313000000;                            // Aug 2011
+  for (let page = 0; page < 12; page++) {
+    const r = await fetch(`https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=86400&limit=1000&start=${start}`);
+    if (!r.ok) break;
+    const ohlc = (await r.json())?.data?.ohlc ?? [];
+    if (!ohlc.length) break;
+    ohlc.forEach(k => out.push({ time: Number(k.timestamp) + TZ_OFFSET_SEC, close: Number(k.close) }));
+    start = Number(ohlc.at(-1).timestamp) + 86400;
+    if (start > Date.now() / 1000) break;
+  }
+  if (out.length) bitstampDailyCache = { at: Date.now(), data: out };
+  return out;
+}
+
+async function fetchDailyForPi(sym) {
+  if (currentBase === 'BTC' && currentQuote !== 'EUR') {
+    const d = await fetchBitstampDailyBTC();
+    if (d.length) return d;
+  }
+  const hit = binanceDailyCache.get(sym.symbol);
+  if (hit && Date.now() - hit.at < 3600e3) return hit.data;
+  const data = parseKlines(await fetchKlines(sym.symbol, '1d', 1000)).map(c => ({ time: c.time, close: c.close }));
+  binanceDailyCache.set(sym.symbol, { at: Date.now(), data });
+  return data;
+}
+
+// Pi Cycle Top: 111-day SMA crossing above 2× the 350-day SMA marked the cycle tops
+// of 2013, 2017 and 2021. Only meaningful on 1D and higher timeframes.
+const PI_TFS = new Set(['1d', '3d', '5d', '1w', '1M']);
+
+async function updatePiCycle(candles, tf, sym) {
+  const clear = () => { ser.pi111.setData([]); ser.pi350.setData([]); piSignals = []; applySwingAndSR(); };
+  if (!PI_TFS.has(tf.interval) || !candles.length) return clear();
+  let daily;
+  try { daily = await fetchDailyForPi(sym); } catch { return clear(); }
+  if (candles !== currentCandles || !daily.length) return;   // user switched meanwhile
+
+  const n = daily.length, closes = daily.map(d => d.close);
+  const sma = len => {
+    const out = new Array(n).fill(null);
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      sum += closes[i];
+      if (i >= len) sum -= closes[i - len];
+      if (i >= len - 1) out[i] = sum / len;
+    }
+    return out;
+  };
+  const s111 = sma(111), s350 = sma(350).map(v => v == null ? null : v * 2);
+
+  // Map daily values onto the chart candles: each candle takes the value of the
+  // last day inside it (so a weekly candle shows its end-of-week value).
+  const a = [], b = [];
+  let j = 0;
+  for (let i = 0; i < candles.length; i++) {
+    const end = i + 1 < candles.length ? candles[i + 1].time : Infinity;
+    while (j + 1 < n && daily[j + 1].time < end) j++;
+    if (daily[j].time >= end || daily[j].time < candles[i].time - 40 * 86400) continue;
+    if (s111[j] != null) a.push({ time: candles[i].time, value: s111[j] });
+    if (s350[j] != null) b.push({ time: candles[i].time, value: s350[j] });
+  }
+  ser.pi111.setData(a);
+  ser.pi350.setData(b);
+
+  // Signal on the candle that contains the crossing day
+  piSignals = [];
+  for (let k = 1; k < n; k++) {
+    if (s111[k] == null || s350[k] == null || s111[k - 1] == null || s350[k - 1] == null) continue;
+    if (!(s111[k - 1] <= s350[k - 1] && s111[k] > s350[k])) continue;
+    const t = daily[k].time;
+    let lo = 0, hi = candles.length - 1, idx = -1;
+    while (lo <= hi) { const m = (lo + hi) >> 1; if (candles[m].time <= t) { idx = m; lo = m + 1; } else hi = m - 1; }
+    if (idx < 0) continue;
+    piSignals.push({ time: candles[idx].time, position: 'aboveBar', color: '#ffa657',
+                     shape: 'arrowDown', text: 'Pi Cycle top', size: 1 });
+  }
+  applySwingAndSR();
+}
+
+// ── Growth curves + halving lines (drawn as one overlay) ─────────────────────
+// Growth curves: power law log10(price) = a + b·log10(days since genesis block),
+// fitted on Bitstamp BTC/USD daily data through the cycle tops (2013, 2017, 2021,
+// 2025) and cycle bottoms (2011, 2015, 2018, 2022). Each band spans the spread of
+// those tops/bottoms around the fit. Own fit (Sep 2026), not TradingView's script.
+const GENESIS_TS = Date.UTC(2009, 0, 3) / 1000;
+const GROWTH_BANDS = [
+  { a: -9.485658957045871,  b: 3.8831286190073717, lo: -0.1175, hi: 0.1319,
+    fill: 'rgba(188,140,255,0.14)', line: 'rgba(188,140,255,0.8)', label: 'Top-curve' },
+  { a: -16.43979936302429,  b: 5.5793842287822635, lo: -0.0421, hi: 0.0702,
+    fill: 'rgba(88,166,255,0.14)',  line: 'rgba(88,166,255,0.8)',  label: 'Bodem-curve' },
+];
+const HALVING_LINES = [
+  { t: Date.UTC(2012, 10, 28) / 1000, label: 'Halving 2012' },
+  { t: Date.UTC(2016,  6,  9) / 1000, label: 'Halving 2016' },
+  { t: Date.UTC(2020,  4, 11) / 1000, label: 'Halving 2020' },
+  { t: Date.UTC(2024,  3, 20) / 1000, label: 'Halving 2024' },
+  { t: Date.UTC(2028,  3, 15) / 1000, label: 'Halving ~apr 2028 (verwacht)', future: true },
+];
+
+// Time ↔ logical bar index, interpolated between candles and extrapolated past
+// either end, so lines can be placed on dates without a candle (or in the future).
+function timeToLogical(t) {
+  const c = currentCandles, n = c.length;
+  if (n < 2) return null;
+  if (t <= c[0].time)   return (t - c[0].time) / (c[1].time - c[0].time);
+  if (t >= c[n-1].time) return n - 1 + (t - c[n-1].time) / (c[n-1].time - c[n-2].time);
+  let lo = 0, hi = n - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (c[m].time <= t) lo = m; else hi = m; }
+  return lo + (t - c[lo].time) / (c[hi].time - c[lo].time);
+}
+function logicalToTime(l) {
+  const c = currentCandles, n = c.length;
+  if (n < 2) return null;
+  if (l <= 0)     return c[0].time + l * (c[1].time - c[0].time);
+  if (l >= n - 1) return c[n-1].time + (l - n + 1) * (c[n-1].time - c[n-2].time);
+  const i = Math.floor(l);
+  return c[i].time + (l - i) * (c[i+1].time - c[i].time);
+}
+
+class CycleOverlayPrimitive {
+  attached({ chart, series, requestUpdate }) {
+    this._chart = chart; this._series = series; this._requestUpdate = requestUpdate;
+  }
+  detached() {}
+  requestRedraw() { this._requestUpdate?.(); }
+  updateAllViews() {}
+  paneViews() {
+    const self = this;
+    return [{
+      zOrder: () => 'bottom',
+      renderer: () => ({ draw: target => self._draw(target) }),
+    }];
+  }
+  _draw(target) {
+    if (!this._chart || currentCandles.length < 2) return;
+    const showGrowth  = indVisible.growth && currentBase === 'BTC' && currentQuote !== 'EUR';
+    const showHalving = indVisible.halving;
+    if (!showGrowth && !showHalving) return;
+    const ts = this._chart.timeScale(), s = this._series;
+
+    target.useBitmapCoordinateSpace(({ context: ctx, bitmapSize, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
+      const W = bitmapSize.width / hr, H = bitmapSize.height / vr;
+
+      if (showGrowth) {
+        GROWTH_BANDS.forEach(g => {
+          const top = [], bot = [];
+          for (let x = 0; x <= W + 4; x += 4) {
+            const l = ts.coordinateToLogical(x);
+            const t = l == null ? null : logicalToTime(l);
+            if (t == null) continue;
+            const days = (t - TZ_OFFSET_SEC - GENESIS_TS) / 86400;
+            if (days < 30) continue;
+            const base = g.a + g.b * Math.log10(days);
+            const yHi = s.priceToCoordinate(10 ** (base + g.hi));
+            const yLo = s.priceToCoordinate(10 ** (base + g.lo));
+            if (yHi == null || yLo == null) continue;
+            top.push([x, yHi]); bot.push([x, yLo]);
+          }
+          if (top.length < 2) return;
+          ctx.beginPath();
+          top.forEach(([x, y]) => ctx.lineTo(x * hr, y * vr));
+          for (let k = bot.length - 1; k >= 0; k--) ctx.lineTo(bot[k][0] * hr, bot[k][1] * vr);
+          ctx.closePath();
+          ctx.fillStyle = g.fill; ctx.fill();
+          ctx.strokeStyle = g.line; ctx.lineWidth = Math.max(1, hr);
+          [top, bot].forEach(pts => {
+            ctx.beginPath(); pts.forEach(([x, y]) => ctx.lineTo(x * hr, y * vr)); ctx.stroke();
+          });
+          // Label near the right edge, on the upper line of the band
+          const [lx, ly] = top.at(-1);
+          if (ly > 12 && ly < H) {
+            ctx.font = `${10 * vr}px monospace`; ctx.fillStyle = g.line; ctx.textAlign = 'right';
+            ctx.fillText(g.label, (lx - 70) * hr, (ly - 4) * vr);
+          }
+        });
+      }
+
+      if (showHalving) {
+        ctx.font = `${10 * vr}px monospace`; ctx.textAlign = 'left';
+        // Linear logical→x mapping from the two pane edges (works for fractional
+        // and out-of-range indices, unlike logicalToCoordinate)
+        const l0 = ts.coordinateToLogical(0), l1 = ts.coordinateToLogical(W);
+        if (l0 == null || l1 == null || l1 === l0) return;
+        HALVING_LINES.forEach(h => {
+          const l = timeToLogical(h.t + TZ_OFFSET_SEC);
+          const x = l == null ? null : (l - l0) / (l1 - l0) * W;
+          if (x == null || x < 0 || x > W) return;
+          ctx.strokeStyle = h.future ? 'rgba(88,166,255,0.8)' : 'rgba(248,81,73,0.7)';
+          ctx.lineWidth = Math.max(1, hr);
+          ctx.setLineDash([6 * hr, 4 * hr]);
+          ctx.beginPath(); ctx.moveTo(x * hr, 0); ctx.lineTo(x * hr, H * vr); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = ctx.strokeStyle;
+          ctx.fillText(h.label, (x + 4) * hr, 14 * vr);
+        });
+      }
+    });
+  }
+}
+
+// While GC is on, candles take the DonovanWall bar colours; otherwise the normal ones.
+function applyGCCandleColors() {
+  if (!currentCandles.length) return;
+  candleSeries.setData(!indVisible.gc ? currentCandles : currentCandles.map(c => {
+    const col = gcBarColors.get(c.time);
+    return col ? { ...c, color: col, borderColor: col, wickColor: col } : c;
+  }));
 }
 
 function calcBBWidth(candles) {
@@ -1650,6 +2007,8 @@ function applySwingAndSR() {
   if (indVisible.bambam) {
     bambamSignals.forEach(s => markers.push(s));
   }
+  if (indVisible.st) stSignals.forEach(s => markers.push(s));
+  if (indVisible.pi) piSignals.forEach(s => markers.push(s));
   markers.sort((a, b) => a.time - b.time);
   candleSeries.setMarkers(markers);
 
@@ -1829,6 +2188,13 @@ async function loadChart(tf, sym, resetView = true) {
     // Price chart
     candleSeries.setData(candles);
     lineSeries.setData(candles.map(c => ({ time: c.time, value: c.close })));
+    ser.overlayHost.setData(candles.map(c => ({ time: c.time, value: c.close })));
+
+    // Supertrend (10, 3)
+    const st = calcSupertrend(candles);
+    ser.st_up.setData(st.up);
+    ser.st_dn.setData(st.dn);
+    stSignals = st.signals;
 
     // Moving averages (expanding window → always visible, even on 1M)
     ser.sma200.setData(calcSMAExp(candles, 200));
@@ -1854,6 +2220,8 @@ async function loadChart(tf, sym, resetView = true) {
     ser.gc_upper.setData(gc.upper);
     ser.gc_mid.setData(  gc.mid);
     ser.gc_lower.setData(gc.lower);
+    gcFill.setData(gc);
+    gcBarColors = gc.bars;
 
     // PSAR
     const psar = calcPSAR(candles);
@@ -1905,6 +2273,9 @@ async function loadChart(tf, sym, resetView = true) {
 
     // Store for swing/SR so toggle callbacks can re-apply without re-fetching
     currentCandles  = candles;
+    if (indVisible.gc) applyGCCandleColors();
+    cycleOverlay.requestRedraw();
+    if (indVisible.pi) updatePiCycle(candles, tf, sym);
     currentSwingPts = calcSwingPoints(candles);
 
     applyChartType();
@@ -2004,6 +2375,8 @@ function applyAllVisibility() {
 
   [ser.kc_upper, ser.kc_mid, ser.kc_lower].forEach(s => s.applyOptions({ visible: indVisible.kc }));
   [ser.gc_upper, ser.gc_mid, ser.gc_lower].forEach(s => s.applyOptions({ visible: indVisible.gc }));
+  [ser.st_up, ser.st_dn].forEach(s => s.applyOptions({ visible: indVisible.st }));
+  [ser.pi111, ser.pi350].forEach(s => s.applyOptions({ visible: indVisible.pi }));
 
   const ps = indVisible.psar;
   ser.psar_bull.applyOptions({ visible: ps });
@@ -2058,6 +2431,23 @@ function toggleIndicator(id, visible) {
     drawPhases();
     return;
   }
+  if (id === 'st') {
+    ser.st_up.applyOptions({ visible });
+    ser.st_dn.applyOptions({ visible });
+    applySwingAndSR();
+    return;
+  }
+  if (id === 'pi') {
+    ser.pi111.applyOptions({ visible });
+    ser.pi350.applyOptions({ visible });
+    if (visible) updatePiCycle(currentCandles, currentTF, currentSymbol);
+    else applySwingAndSR();
+    return;
+  }
+  if (id === 'growth' || id === 'halving') {
+    cycleOverlay.requestRedraw();
+    return;
+  }
   if (id === 'bambam') {
     ser.bbStep.applyOptions(   { visible });
     ser.bbRsiEma.applyOptions( { visible });
@@ -2104,6 +2494,7 @@ function toggleIndicator(id, visible) {
   }
   if (id === 'gc') {
     [ser.gc_upper, ser.gc_mid, ser.gc_lower].forEach(s => s.applyOptions({ visible }));
+    applyGCCandleColors();
     return;
   }
   if (id === 'psar') {
@@ -2806,6 +3197,22 @@ function buildTFButtons() {
   });
 }
 
+function buildLogButton() {
+  const btn = document.getElementById('log-btn');
+  const apply = on => {
+    btn.classList.toggle('active', on);
+    chart.priceScale('right').applyOptions({
+      mode: on ? LightweightCharts.PriceScaleMode.Logarithmic : LightweightCharts.PriceScaleMode.Normal,
+    });
+  };
+  apply(!!loadPrefs().logScale);
+  btn.addEventListener('click', () => {
+    const on = !btn.classList.contains('active');
+    apply(on);
+    savePrefs({ logScale: on });
+  });
+}
+
 function buildChartTypeButtons() {
   document.querySelectorAll('.ct-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -2970,6 +3377,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   buildPairSelector();
   buildTFButtons();
   buildChartTypeButtons();
+  buildLogButton();
   buildIndicatorButtons();
   buildTrendRows();
 
