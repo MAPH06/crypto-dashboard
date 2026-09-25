@@ -4,7 +4,7 @@
 //  CONFIG
 // ═══════════════════════════════════════════════════════════
 
-const APP_VERSION   = 'v63';
+const APP_VERSION   = 'v64';
 const BINANCE_BASE  = 'https://api.binance.com/api/v3';
 const CHART_REFRESH = 120_000;
 const TREND_REFRESH = 5 * 60_000;
@@ -1476,6 +1476,46 @@ function rsiMomentumAnalysis(candles) {
                return  { label: `⚡ OS ${v}`,   cls: 'rsi-ext-bull' };
 }
 
+// MACD(12,26,9) in words: position vs signal line, a fresh cross (last 3 candles),
+// whether the histogram grows or shrinks, and which side of the zero line.
+function macdAnalysis(candles) {
+  const { macd, signal, hist } = calcMACD(candles);
+  if (hist.length < 4) return { label: '—', cls: 'neutral', tip: '' };
+  const h    = hist.map(x => x.value);
+  const now  = h.at(-1), prev = h.at(-2);
+  const m    = macd.at(-1).value, s = signal.at(-1).value;
+  const zero = m >= 0 ? 'boven 0' : 'onder 0';
+
+  // Cross within the last 3 candles: histogram changed sign
+  let cross = null;
+  for (let i = h.length - 1; i >= Math.max(1, h.length - 3); i--) {
+    if (h[i] >= 0 && h[i - 1] < 0) { cross = 'bull'; break; }
+    if (h[i] <  0 && h[i - 1] >= 0) { cross = 'bear'; break; }
+  }
+
+  let label, cls;
+  if (cross === 'bull')      { label = '⚡ Bull cross';    cls = 'macd-ext-bull'; }
+  else if (cross === 'bear') { label = '⚡ Bear cross';    cls = 'macd-ext-bear'; }
+  else if (now >= 0) {
+    if (now >= prev)         { label = '▲ Versterkt';     cls = 'macd-bull'; }
+    else                     { label = '▲ Zwakt af';      cls = 'macd-weak'; }
+  } else {
+    if (now <= prev)         { label = '▼ Versterkt';     cls = 'macd-bear'; }
+    else                     { label = '▼ Zwakt af';      cls = 'macd-weak'; }
+  }
+
+  const f = v => Math.abs(v) >= 1 ? v.toFixed(2) : v.toPrecision(3);
+  const tip = [
+    `MACD ${f(m)} / signaal ${f(s)} / histogram ${f(now)}`,
+    now >= 0 ? 'MACD boven signaallijn → koopdruk overheerst' : 'MACD onder signaallijn → verkoopdruk overheerst',
+    cross ? `Recente ${cross === 'bull' ? 'bullish' : 'bearish'} crossover (laatste 3 candles)` : null,
+    cross ? null : Math.abs(now) >= Math.abs(prev) ? 'Histogram groeit → momentum neemt toe' : 'Histogram krimpt → momentum neemt af',
+    m >= 0 ? 'Boven de nullijn → EMA12 > EMA26 (uptrend)' : 'Onder de nullijn → EMA12 < EMA26 (downtrend)',
+  ].filter(Boolean).join('\n');
+
+  return { label: `${label} · ${zero}`, cls, tip };
+}
+
 function entryAnalysis(candles) {
   if (candles.length < 30) return { label: '—', cls: 'neutral' };
   const cloud   = ichimokuCloudNow(candles);
@@ -2605,7 +2645,7 @@ async function updateTrendPanel(symbol) {
     };
 
     if (!candles.length) {
-      ['td-vol','td-ichi','td-trend-sig','td-ma','td-bb','td-mom','td-entry','td-exit','td-signals','td-setup']
+      ['td-vol','td-ichi','td-trend-sig','td-ma','td-bb','td-mom','td-entry','td-macd','td-exit','td-signals','td-setup']
         .forEach(c => setCell(c, '—', 'neutral'));
       ['td-ep','td-sl','td-tp'].forEach(c => {
         const el = row.querySelector(`.${c}`); if (el) el.textContent = '—';
@@ -2642,6 +2682,11 @@ async function updateTrendPanel(symbol) {
 
     const entry = entryAnalysis(candles);
     setCell('td-entry', entry.label, entry.cls);
+
+    const macd = macdAnalysis(candles);
+    setCell('td-macd', macd.label, macd.cls);
+    const macdEl = row.querySelector('.td-macd');
+    if (macdEl) macdEl.title = macd.tip;
 
     const exit = exitAnalysis(candles);
     setCell('td-exit', exit.label, exit.cls);
@@ -2823,6 +2868,7 @@ function buildTrendRows() {
       <td class="td-bb neutral">—</td>
       <td class="td-mom neutral">—</td>
       <td class="td-entry neutral">—</td>
+      <td class="td-macd neutral">—</td>
       <td class="td-exit neutral">—</td>
       <td class="td-signals neutral">—</td>
       <td class="td-setup neutral">—</td>
@@ -2831,6 +2877,22 @@ function buildTrendRows() {
       <td class="td-tp">—</td>
       <td class="td-pct">—</td>`;
     tbody.appendChild(tr);
+  });
+
+  // Collapse/expand: the header row stays as a slim bar; the charts take the
+  // freed height automatically (their ResizeObservers pick up the new size).
+  const panel  = document.getElementById('trend-panel');
+  const toggle = document.getElementById('trend-toggle');
+  const setCollapsed = on => {
+    panel.classList.toggle('collapsed', on);
+    toggle.textContent = (on ? '▸' : '▾') + ' TF';
+    toggle.title = on ? 'Informatieoverzicht uitklappen' : 'Informatieoverzicht inklappen';
+  };
+  setCollapsed(!!loadPrefs().trendCollapsed);
+  toggle.addEventListener('click', () => {
+    const on = !panel.classList.contains('collapsed');
+    setCollapsed(on);
+    savePrefs({ trendCollapsed: on });
   });
 }
 

@@ -340,7 +340,7 @@ html, body {
 }
 #trend-table {
   width: 100%;
-  min-width: 1780px;
+  min-width: 1920px;
   border-collapse: collapse;
   font-size: 11px;
 }
@@ -408,6 +408,21 @@ html, body {
 .td-entry.stoch-neutral  { color: var(--muted); }
 .td-entry.stoch-bear     { color: #e5534b; font-weight: 600; }
 .td-entry.stoch-ext-bear { color: #da3633; font-weight: 700; }
+
+.td-macd.macd-ext-bull { color: #26a641; font-weight: 700; }
+.td-macd.macd-bull     { color: #57ab5a; font-weight: 600; }
+.td-macd.macd-weak     { color: var(--yellow); }
+.td-macd.macd-bear     { color: #e5534b; font-weight: 600; }
+.td-macd.macd-ext-bear { color: #da3633; font-weight: 700; }
+.td-macd.neutral       { color: var(--muted); }
+
+/* Collapsible trend panel — header row stays visible as the toggle bar */
+#trend-toggle {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--muted); font: inherit; letter-spacing: inherit; text-transform: inherit;
+}
+#trend-toggle:hover { color: var(--blue); }
+#trend-panel.collapsed #trend-body { display: none; }
 
 .td-exit.exit-bull { color: #26a641; font-weight: 600; }
 .td-exit.exit-bear { color: #da3633; font-weight: 700; }
