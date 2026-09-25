@@ -4,7 +4,7 @@
 //  CONFIG
 // ═══════════════════════════════════════════════════════════
 
-const APP_VERSION   = 'v61';
+const APP_VERSION   = 'v62';
 const BINANCE_BASE  = 'https://api.binance.com/api/v3';
 const CHART_REFRESH = 120_000;
 const TREND_REFRESH = 5 * 60_000;
@@ -254,9 +254,9 @@ const TIMEFRAMES = [
   // 5D/3D are built from 1D candles (src) aggregated per N days, so they get the
   // same extended history as 1D. `preset` sets indicators when the TF is selected.
   { label: '5D',  interval: '5d',  src: '1d', days: 5, limit: 1000, view: 220,
-    preset: { ema9: false, sma20: false, sma50: false, sma200: false, bb: false, gc: true } },
+    preset: { ema9: false, sma9: false, sma20: false, sma50: false, sma200: false, bb: false, gc: true } },
   { label: '3D',  interval: '3d',  src: '1d', days: 3, limit: 1000, view: 245,
-    preset: { ema9: false, sma20: true,  sma50: false, sma200: true,  bb: false } },
+    preset: { ema9: false, sma9: false, sma20: true,  sma50: false, sma200: true,  bb: false } },
   { label: '1D',  interval: '1d',  limit: 1000, view: 730 },
   { label: '4H',  interval: '4h',  limit: 1000, view: 180 },
   { label: '1H',  interval: '1h',  limit: 1000, view: 168 },
@@ -283,6 +283,7 @@ const TREND_TFS = [
 // Overlay indicators on the main chart
 const OVERLAY_INDS = [
   { id: 'ema9',     label: 'EMA9',      color: '#d0d7de', defaultOn: false },
+  { id: 'sma9',     label: 'SMA9',      color: '#ffffff', defaultOn: false },
   { id: 'sma20',    label: 'SMA20',     color: '#f5e642', defaultOn: true  },
   { id: 'sma50',    label: 'SMA50',     color: '#fd7e14', defaultOn: true  },
   { id: 'sma200',   label: 'SMA200',    color: '#f85149', defaultOn: true  },
@@ -512,6 +513,8 @@ function initChart() {
   ser.sma50  = mkLine(chart, '#fd7e14', 2, false);
   ser.sma20  = mkLine(chart, '#f5e642', 2, false);
   ser.ema9   = mkLine(chart, '#d0d7de', 2, false);
+  ser.sma9   = mkLine(chart, '#ffffff', 2, false, true);
+  ser.sma9.applyOptions({ lineStyle: LightweightCharts.LineStyle.Dotted });
 
   // BamBam stepping line — EMA(21) as dynamic support/resistance guide
   ser.bbStep = chart.addLineSeries({
@@ -1792,6 +1795,7 @@ async function loadChart(tf, sym, resetView = true) {
     ser.sma50.setData( calcSMAExp(candles, 50));
     ser.sma20.setData( calcSMAExp(candles, 20));
     ser.ema9.setData(  calcEMA(candles, 9));
+    ser.sma9.setData(  calcSMAExp(candles, 9));
 
     // Bollinger Bands
     const bb = calcBB(candles);
@@ -1950,6 +1954,7 @@ function applyAllVisibility() {
   ser.sma50.applyOptions(  { visible: indVisible.sma50  });
   ser.sma20.applyOptions(  { visible: indVisible.sma20  });
   ser.ema9.applyOptions(   { visible: indVisible.ema9   });
+  ser.sma9.applyOptions(   { visible: indVisible.sma9   });
 
 
   const bb = indVisible.bb;
